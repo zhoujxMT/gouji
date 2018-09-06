@@ -24,34 +24,6 @@ func NewRoom() *Room {
 	return &room
 }
 
-func (this *Room) GetRoomID() string {
-	return this.roomid
-}
-
-func (this *Room) setRoomID(roomid string) {
-	this.roomid = roomid
-}
-
-func (this *Room) GetStatus() int {
-	return this.status
-}
-
-func (this *Room) setStatus(status int) {
-	this.status = status
-}
-
-func (this *Room) GetPCount() int {
-	return this.pcount
-}
-
-func (this *Room) ISMatching() bool {
-	return this.GetStatus() == STATUS_MATCHING
-}
-
-func (this *Room) ISSetout() bool {
-	return this.GetStatus() == STATUS_SETOUT
-}
-
 func (this *Room) addUser(user *User) {
 	this.users = append(this.users, user)
 	//人数已满
@@ -70,16 +42,16 @@ func (this *Room) removeUser(user *User) {
 	}
 }
 
-func (this *Room) GetUsers() []*User {
-	return this.users
-}
-
 func (this *Room) push(content string) {
 	users := this.GetUsers()
 	for _, user := range users {
 		user.push(content)
 	}
 }
+
+/*
+	逻辑实现
+*/
 
 func (this *Room) start() {
 	fmt.Println("开赛")

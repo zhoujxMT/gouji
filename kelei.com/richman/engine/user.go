@@ -20,31 +20,6 @@ func NewUser() *User {
 	return &user
 }
 
-func (this *User) getUserID() string {
-	return this.userid
-}
-
-func (this *User) setUserID(userid string) {
-	this.userid = userid
-}
-
-func (this *User) getConn() net.Conn {
-	return this.conn
-}
-
-func (this *User) setConn(conn net.Conn) {
-	this.conn = conn
-}
-
-func (this *User) getRoom() *Room {
-	return this.room
-}
-
-func (this *User) enterRoom(room *Room) {
-	this.room = room
-	room.addUser(this)
-}
-
 func (this *User) push(content string) {
 	go func() {
 		time.Sleep(time.Millisecond)
@@ -54,4 +29,13 @@ func (this *User) push(content string) {
 		err := xServer.SendMessage(conn, "service_path", "service_method", nil, []byte(content))
 		logger.CheckError(err, fmt.Sprintf("failed to send messsage to %s : ", conn.RemoteAddr().String()))
 	}()
+}
+
+/*
+	逻辑实现
+*/
+
+func (this *User) enterRoom(room *Room) {
+	this.room = room
+	room.addUser(this)
 }

@@ -29,10 +29,16 @@ func (this *RichManS) Call(ctx context.Context, args *rpcs.Args, reply *rpcs.Rep
 	args.V["clientConn"] = clientConn
 	v := reflect.ValueOf(engine)
 	funcName := args.V["funcname"].(string)
-	logger.Debugf("收到请求:%s%v", funcName, args.V["args"])
+	logger.Debugf("收到请求1:%s%v", funcName, args.V["args"])
 	mv := v.MethodByName(funcName)
 	res := mv.Call([]reflect.Value{reflect.ValueOf(args)})
-	reply.V = res[0].Interface().(*string)
-	logger.Debugf("回发结果:%s", *reply.V)
+	r := res[0].Interface().(*rpcs.Reply)
+	reply.RS = r.RS
+	reply.SC = r.SC
+	if reply.RS == nil {
+		logger.Debugf("   回发结果:%s,%v", reply.SC, reply.RS)
+	} else {
+		logger.Debugf("   回发结果:%s,%s", reply.SC, *reply.RS)
+	}
 	return nil
 }

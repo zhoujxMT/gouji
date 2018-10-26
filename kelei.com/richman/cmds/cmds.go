@@ -6,6 +6,7 @@ import (
 
 	eng "kelei.com/richman/engine"
 	"kelei.com/utils/frame/command"
+	"kelei.com/utils/frame/config"
 	"kelei.com/utils/logger"
 )
 
@@ -20,17 +21,13 @@ func Inject(engine_ *eng.Engine) {
 func GetCmds() map[string]func(string) {
 	var commands = map[string]func(string){}
 	//begin 自定义方法
-	commands["test"] = test
 	commands["usercount"] = usercount
 	commands["roomcount"] = roomcount
 	commands["roominfo"] = roominfo
 	//end
+	commands["mode"] = config.Mode
 	command.CreateHelp(commands)
 	return commands
-}
-
-func test(cmdVal string) {
-	logger.Infof("test succees")
 }
 
 func usercount(cmdVal string) {

@@ -21,8 +21,14 @@ func (this *UserSystem) AddUser(userid string, conn net.Conn) *User {
 		user.setConn(conn)
 		user.setUserID(userid)
 		this.users[userid] = user
+	} else {
+		user.setConn(conn)
 	}
 	return user
+}
+
+func (this *UserSystem) Clear() {
+	this.users = make(map[string]*User)
 }
 
 func (this *UserSystem) removeUser(user *User) {

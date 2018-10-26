@@ -20,6 +20,22 @@ func (this *Room) GetUsers() []*User {
 	return this.users
 }
 
+func (this *Room) GetGridSystem() *GridSystem {
+	return this.gridSystem
+}
+
+func (this *Room) GetRoomUserSystem() *RoomUserSystem {
+	return this.roomUserSystem
+}
+
+func (this *Room) GetItemSystem() *ItemSystem {
+	return this.itemSystem
+}
+
+func (this *Room) GetTurretSystem() *TurretSystem {
+	return this.turretSystem
+}
+
 func (this *Room) GetPCount() int {
 	return this.pcount
 }

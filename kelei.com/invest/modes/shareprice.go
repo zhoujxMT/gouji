@@ -53,7 +53,7 @@ func (e *SharePrice) getSharePrice(id string) *string {
 		}
 		info = *RemoveLastChar(buff)
 		rds.Do("set", key, info)
-		rds.Do("expire", key, ExpTime_Hour)
+		rds.Do("expire", key, ExpTime_Short)
 	}
 	return &info
 }

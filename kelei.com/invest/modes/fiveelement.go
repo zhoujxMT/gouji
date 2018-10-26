@@ -29,34 +29,40 @@ type JsonProfitability struct {
 	GrowthEfficiencyPremium float64 //增长效率溢价
 	CurrentPriceToBook      float64 //当前市净率
 	EnterpriseData          string  //企业全部数据
+	GrowthSpaceAnalysis     string  //增长空间分析
+	GrowthSpaceScore        float64 //增长空间评分
+	SpaceEfficiencyDes      string  //空间效率描述
 }
 
 func (p *Profitability) ShowProfitability(c *gin.Context, args []string) {
 	id := args[0]
-	investCount, growthSpacePremium, growthEfficiencyPremium, currentPriceToBook := p.getEnterpriseInfo(id)
+	investCount, growthSpacePremium, growthEfficiencyPremium, currentPriceToBook, growthSpaceAnalysis, growthSpaceScore, SpaceEfficiencyDes := p.getEnterpriseInfo(id)
 	//获取所有数据
 	enterpriseData := p.getEnterpriseData(id)
 	//生成json
-	jsonPro := JsonProfitability{investCount, growthSpacePremium, growthEfficiencyPremium, currentPriceToBook, *enterpriseData}
+	jsonPro := JsonProfitability{investCount, growthSpacePremium, growthEfficiencyPremium, currentPriceToBook, *enterpriseData, growthSpaceAnalysis, growthSpaceScore, SpaceEfficiencyDes}
 	//若返回json数据，可以直接使用gin封装好的JSON方法
 	c.JSON(http.StatusOK, jsonPro)
 }
 
 //获取企业信息
-func (p *Profitability) getEnterpriseInfo(id string) (int, float64, float64, float64) {
+func (p *Profitability) getEnterpriseInfo(id string) (int, float64, float64, float64, string, float64, string) {
 	//获取投资次数
 	enterprise := Enterprise{}
 	info := *enterprise.getEnterprise(id)
 	if info == "" {
 		logger.Errorf("企业不存在")
-		return 0, 0, 0, 0
+		return 0, 0, 0, 0, "", 0, ""
 	}
 	infoArr := strings.Split(info, "|")
 	investCount, _ := strconv.Atoi(infoArr[7])
 	growthSpacePremium, _ := strconv.ParseFloat(infoArr[8], 10)
 	growthEfficiencyPremium, _ := strconv.ParseFloat(infoArr[9], 10)
 	currentPriceToBook, _ := strconv.ParseFloat(infoArr[10], 10)
-	return investCount, growthSpacePremium, growthEfficiencyPremium, currentPriceToBook
+	growthSpaceAnalysis := infoArr[12]
+	growthSpaceScore, _ := strconv.ParseFloat(infoArr[13], 10)
+	spaceEfficiencyDes := infoArr[14]
+	return investCount, growthSpacePremium, growthEfficiencyPremium, currentPriceToBook, growthSpaceAnalysis, growthSpaceScore, spaceEfficiencyDes
 }
 
 func (p *Profitability) getKey(id string) string {
@@ -72,39 +78,82 @@ func (p *Profitability) getEnterpriseData(id string) *string {
 	info, err := redis.String(rds.Do("get", key))
 	if err != nil {
 		db := frame.GetDB()
-		rows, err := db.Query("select year,gmnetmargin,gmNetMarginGrowthRate,roe,totalAssetGrowthRate,netAssetGrowthRate,openIncomeGrowthRate,netMargin,netMarginGrowthRate,manageCashNetAmount,investCashNetAmount,InvestReceCash,LessShareholderInvestReceCash,NetAsset,LiabilityWithInterestRate from enterprisedata where enterpriseid=?", id)
+		rows, err := db.Query("select * from (select year,gmnetmargin,roe,totalAsset,gmNetAsset,openIncome,netMargin,netMarginGrowthRate,manageCashNetAmount,investCashNetAmount,InvestReceCash,lessShareholderInvestReceCash,NetAsset,ShortLoan,NoCLMWOY,LongLoan,LongClaim from enterprisedata where enterpriseid=? order by year desc limit 6) aa order by year", id)
 		logger.CheckFatal(err, "getEnterpriseData")
 		defer rows.Close()
 		var year int
-		var gmNetMargin, gmNetMarginGrowthRate, roe, totalAssetGrowthRate, netAssetGrowthRate, openIncomeGrowthRate, netMargin, netMarginGrowthRate, manageCashNetAmount, investCashNetAmount, investReceCash, lessShareholderInvestReceCash, netAsset, liabilityWithInterestRate float64
-		gmNetMarginGrowthRates, roes, investCashNetAmounts, netMargins := []float64{}, []float64{}, []float64{}, []float64{}
+		var gmNetMargin, roe, totalAsset, gmNetAsset, openIncome, netMargin, netMarginGrowthRate, manageCashNetAmount, investCashNetAmount, investReceCash, lessShareholderInvestReceCash, netAsset, shortLoan, noCLMWOY, longLoan, longClaim float64
+		gmNetMargins, roes, investCashNetAmounts, netMargins, netMarginGrowthRates, totalAssets, gmNetAssets, openIncomes := []float64{}, []float64{}, []float64{}, []float64{}, []float64{}, []float64{}, []float64{}, []float64{}
 		strRows := []string{}
+		rowid := 0
 		for rows.Next() {
-			rows.Scan(&year, &gmNetMargin, &gmNetMarginGrowthRate, &roe, &totalAssetGrowthRate, &netAssetGrowthRate, &openIncomeGrowthRate, &netMargin, &netMarginGrowthRate, &manageCashNetAmount, &investCashNetAmount, &investReceCash, &lessShareholderInvestReceCash, &netAsset, &liabilityWithInterestRate)
-			gmNetMarginGrowthRates = append(gmNetMarginGrowthRates, gmNetMarginGrowthRate)
+			rows.Scan(&year, &gmNetMargin, &roe, &totalAsset, &gmNetAsset, &openIncome, &netMargin, &netMarginGrowthRate, &manageCashNetAmount, &investCashNetAmount, &investReceCash, &lessShareholderInvestReceCash, &netAsset, &shortLoan, &noCLMWOY, &longLoan, &longClaim)
+			gmNetMargins = append(gmNetMargins, gmNetMargin)
 			roes = append(roes, roe)
 			investCashNetAmounts = append(investCashNetAmounts, investCashNetAmount)
 			netMargins = append(netMargins, netMargin)
+			netMarginGrowthRates = append(netMarginGrowthRates, netMarginGrowthRate)
+			totalAssets = append(totalAssets, totalAsset)
+			gmNetAssets = append(gmNetAssets, gmNetAsset)
+			openIncomes = append(openIncomes, openIncome)
 			//筹资额度
 			financingAmount := investReceCash - lessShareholderInvestReceCash
-			strRows = append(strRows, fmt.Sprintf("%d|%.2f|%.2f|%.2f|%.2f|%.2f|%.2f|%.2f|%.2f|%.2f|%.2f|%.2f|%.2f|%.2f", year, gmNetMargin, gmNetMarginGrowthRate, roe, totalAssetGrowthRate, netAssetGrowthRate, openIncomeGrowthRate, netMargin, netMarginGrowthRate, manageCashNetAmount, investCashNetAmount, financingAmount, netAsset, liabilityWithInterestRate))
+			//有息负债率
+			liabilityWithInterestRate := (shortLoan + noCLMWOY + longLoan + longClaim) / netAsset * 100
+			//			if rowid > 0 {
+			strRows = append(strRows, fmt.Sprintf("%d|%.2f|%.2f|%.2f|%.2f|%.2f|%.2f|%.2f|%.2f", year, gmNetMargin, roe, netMargin, manageCashNetAmount, investCashNetAmount, financingAmount, netAsset, liabilityWithInterestRate))
+			//			}
+			rowid++
 		}
-		//归母净利润波动率
-		gmNetMarginVolatilitys := p.getVolatility(gmNetMarginGrowthRates)
+		//归母净利润增长率
+		gmNetMarginGrowthRates := p.getGrowthRates(gmNetMargins)
+		//总资产增长率
+		totalAssetGrowthRates := p.getGrowthRates(totalAssets)
+		//归母净资产增长率
+		gmNetAssetGrowthRates := p.getGrowthRates(gmNetAssets)
+		//营业收入增长率
+		openIncomeGrowthRates := p.getGrowthRates(openIncomes)
+		//净利润波动率
+		fmt.Println(netMarginGrowthRates)
+		netMarginVolatilitys := p.getVolatility(netMarginGrowthRates)
+		fmt.Println(netMarginVolatilitys)
 		//净资产收益率(roe)波动率
 		roeVolatilitys := p.getVolatility(roes)
 		//投资率
 		investGates := p.getInvestGates(investCashNetAmounts, netMargins)
 		//拼接进去
 		buff := bytes.Buffer{}
-		var gmNetMarginVolatility, roeVolatility, investGate float64
+		var netMarginVolatility, roeVolatility, investGate, gmNetMarginGrowthRate, totalAssetGrowthRate, gmNetAssetGrowthRate, openIncomeGrowthRate float64
 		for rowid, strRow := range strRows {
-			gmNetMarginVolatility, roeVolatility, investGate = gmNetMarginVolatilitys[rowid], roeVolatilitys[rowid], investGates[rowid]
-			buff.WriteString(fmt.Sprintf("%s|%.2f|%.2f|%.2f$", strRow, gmNetMarginVolatility, roeVolatility, investGate))
+			if len(netMarginVolatilitys) > rowid {
+				netMarginVolatility = netMarginVolatilitys[rowid]
+			}
+			if len(roeVolatilitys) > rowid {
+				roeVolatility = roeVolatilitys[rowid]
+			}
+			if len(investGates) > rowid {
+				investGate = investGates[rowid]
+			}
+			if len(gmNetMarginGrowthRates) > rowid {
+				gmNetMarginGrowthRate = gmNetMarginGrowthRates[rowid]
+			}
+			if len(totalAssetGrowthRates) > rowid {
+				totalAssetGrowthRate = totalAssetGrowthRates[rowid]
+			}
+			if len(gmNetAssetGrowthRates) > rowid {
+				gmNetAssetGrowthRate = gmNetAssetGrowthRates[rowid]
+			}
+			if len(openIncomeGrowthRates) > rowid {
+				openIncomeGrowthRate = openIncomeGrowthRates[rowid]
+			}
+			if len(netMarginGrowthRates) > rowid {
+				netMarginGrowthRate = netMarginGrowthRates[rowid]
+			}
+			buff.WriteString(fmt.Sprintf("%s|%.2f|%.2f|%.2f|%.2f|%.2f|%.2f|%.2f|%.2f$", strRow, netMarginVolatility, roeVolatility, investGate, gmNetMarginGrowthRate, totalAssetGrowthRate, gmNetAssetGrowthRate, openIncomeGrowthRate, netMarginGrowthRate))
 		}
 		info = *RemoveLastChar(buff)
 		rds.Do("set", key, info)
-		rds.Do("expire", key, ExpTime_Hour)
+		rds.Do("expire", key, ExpTime_Short)
 	}
 	return &info
 }
@@ -119,6 +168,17 @@ func (p *Profitability) getInvestGates(investCashNetAmounts, netMargins []float6
 		investGates = append(investGates, investGate)
 	}
 	return investGates
+}
+
+//获取增长率
+func (p *Profitability) getGrowthRates(infos []float64) []float64 {
+	growthRates := []float64{}
+	for i, info := range infos {
+		if i > 0 {
+			growthRates = append(growthRates, (info/infos[i-1]-1)*100)
+		}
+	}
+	return growthRates
 }
 
 //获取波动率

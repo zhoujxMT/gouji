@@ -13,6 +13,8 @@ import (
 const (
 	Discovery_Peer2Peer = iota
 	Discovery_Etcd
+	Discovery_MultipleServers
+	Discovery_Peer2Peer_Etcd
 )
 
 const (
@@ -33,6 +35,7 @@ type Args struct {
 	WebSocket  *WebSocket              //web socket服务
 	Redis      *Redis                  //redis
 	Sql        *Sql                    //sql
+	Config     *Config                 //配置文件
 	Loaded     func()                  //加载框架完成
 }
 

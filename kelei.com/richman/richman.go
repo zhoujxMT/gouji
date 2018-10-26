@@ -36,4 +36,8 @@ func start() {
 func inject(engine *engine.Engine) {
 	rpcs.Inject(engine)
 	cmds.Inject(engine)
+	test()
+}
+
+func test() {
 }

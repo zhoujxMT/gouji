@@ -18,8 +18,9 @@ var (
 )
 
 type HttpGin struct {
-	Addr  string
-	Modes Modes
+	Addr        string
+	Certificate string
+	Modes       Modes
 }
 
 type Modes map[string]interface{}
@@ -39,6 +40,13 @@ func loadHttpGin() {
 	router.POST("/"+args.ServerName, posting)
 	//监听端口
 	address := NewAddress(addr)
+	//有证书,就启用https
+	if args.HttpGin.Certificate != "" {
+		go func() {
+			err := router.RunTLS(":"+address.Port, args.HttpGin.Certificate+".pem", args.HttpGin.Certificate+".key")
+			logger.CheckFatal(err)
+		}()
+	}
 	go http.ListenAndServe(fmt.Sprintf(":%s", address.Port), router)
 }
 

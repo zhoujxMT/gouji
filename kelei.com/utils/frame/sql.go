@@ -21,7 +21,7 @@ func loadSql() {
 	}
 	sqlDSNs := args.Sql.SqlDSNs
 	for _, sqlDSN := range sqlDSNs {
-		logger.Infof("[连接Sql %s]", sqlDSN.Addr)
+		logger.Infof("[连接Sql %s %s]", sqlDSN.Addr, sqlDSN.DataBase)
 		dbs[sqlDSN.Name] = mysql.NewDB(sqlDSN)
 	}
 }
@@ -42,6 +42,9 @@ func GetDB(args ...string) *sql.DB {
 			db = db_
 			break
 		}
+	}
+	if db == nil {
+		return nil
 	}
 	return db.DB
 }

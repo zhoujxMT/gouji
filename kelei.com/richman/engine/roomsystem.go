@@ -24,6 +24,10 @@ func (this *RoomSystem) AddRoom() *Room {
 	return room
 }
 
+func (this *RoomSystem) Clear() {
+	this.rooms = make(map[string]*Room)
+}
+
 func (this *RoomSystem) GetRooms() map[string]*Room {
 	return this.rooms
 }

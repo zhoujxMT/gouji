@@ -4,6 +4,8 @@ import (
 	"net/http"
 
 	"github.com/gorilla/websocket"
+
+	"kelei.com/utils/common"
 	"kelei.com/utils/logger"
 )
 
@@ -13,15 +15,15 @@ const (
 )
 
 type WSServer struct {
-	addr     string
-	wstype   int
-	upgrader websocket.Upgrader
+	addr        string
+	certificate string
+	upgrader    websocket.Upgrader
 }
 
-func New(addr string, wsType int) *WSServer {
+func New(addr string, certificate string) *WSServer {
 	wsServer := WSServer{}
 	wsServer.addr = addr
-	wsServer.wstype = wsType
+	wsServer.certificate = certificate
 	wsServer.upgrader = websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			return true
@@ -42,10 +44,11 @@ func (this *WSServer) Start(handleConn func(conn *websocket.Conn)) {
 	logger.Infof("server started on : %s", this.addr)
 	go func() {
 		var err error
-		if this.wstype == WSType_ws { //ws
+		if this.certificate == "" { //ws
 			err = http.ListenAndServe(this.addr, nil)
 		} else { //wss
-			err = http.ListenAndServeTLS(this.addr, "1527062017174.pem", "1527062017174.key", nil)
+			address := common.NewAddress(this.addr)
+			err = http.ListenAndServeTLS(":"+address.Port, this.certificate+".pem", this.certificate+".key", nil)
 		}
 		logger.CheckFatal(err, "wsserver start")
 	}()

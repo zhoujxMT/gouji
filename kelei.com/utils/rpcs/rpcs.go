@@ -5,5 +5,6 @@ type Args struct {
 }
 
 type Reply struct {
-	V *string
+	RS *string
+	SC string
 }

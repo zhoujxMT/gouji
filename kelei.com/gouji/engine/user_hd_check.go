@@ -87,19 +87,7 @@ func CheckCard(args []string) *string {
 	}
 	//更换牌权
 	if nextUser != nil {
-		if nextUser.isSelf(currentCardsSymmetryUser) { //下一个玩家是牌面玩家的对家
-			//			getBetweenNopassUsers(room.getUsers(),nextUser,currentCardsSymmetryUser)
-			room.setControllerUser(nextUser)
-			canLetCard := nextUser.canLetCard()
-			room.setControllerUser(user)
-			if canLetCard {
-				room.setController(nextUser, SetController_Press)
-			} else {
-				room.setController(nextUser, SetController_Kou)
-			}
-		} else { //不可以让牌
-			room.setController(nextUser, SetController_Press)
-		}
+		room.setController(nextUser, SetController_Press)
 		//是对家,对家没走科
 		if user.isSelf(currentCardsSymmetryUser) && !currentCardsUser.isGo() {
 			//不是四户乱缠
@@ -126,10 +114,10 @@ func CheckCard(args []string) *string {
 		} else {
 			//如果牌面玩家的状态为烧牌出牌的状态
 			if currentCardsUser.getStatus() == UserStatus_Burn_Press {
-				//新一轮
-				room.newCycle()
 				handleControllerUser(func() {
-					room.setController(currentCardsUser, SetController_Burn_Press)
+					//新一轮
+					room.newCycle()
+					room.setController(currentCardsUser, SetController_Burn_New)
 				})
 			} else {
 				if currentUserStatus == UserStatus_WaitKou {

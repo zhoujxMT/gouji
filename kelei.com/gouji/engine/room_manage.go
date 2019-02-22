@@ -28,11 +28,6 @@ var (
 
 //初始化
 func (r *roomManage) Init() int {
-	go func() {
-		for {
-			time.Sleep(time.Second * 5)
-		}
-	}()
 	return 1
 }
 

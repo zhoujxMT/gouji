@@ -28,7 +28,7 @@ func EnterGJYX(args []string) (*string, string, *User) {
 	matchID, err := strconv.Atoi(args[1])
 	logger.CheckFatal(err, "Matching:1")
 	roomType_s := args[2]
-	currentRoomID := args[3]
+	currentRoomID := args[4]
 	user := UserManage.GetUser(&userid)
 	//进入房间的判断
 	res = *checkEnterRoom(userid, matchID, roomType_s)
@@ -40,41 +40,43 @@ func EnterGJYX(args []string) (*string, string, *User) {
 	logger.CheckFatal(err3, "Matching:2")
 	//不在比赛中
 	if currentRoomID == "-1" {
-		user.reset()
-		room := &Room{}
-		userIndex := 0
-		gameRule := room.GetGameRuleConfig()
-		if gameRule == GameRule_Normal {
-			//获取人数不满的房间
-			room = getVacancyRoom(matchID, roomType)
-		} else if gameRule == GameRule_Record {
-			uid := *user.getUID()
-			reg := regexp.MustCompile(`[0-9]+`)
-			uid_str := reg.FindAllString(uid, -1)
-			uid_int, _ := strconv.Atoi(strings.Join(uid_str, ""))
-			roomid := 1
-			if uid_int <= 16 {
-				roomid = 1
-			} else if uid_int <= 26 {
-				roomid = 2
-			} else if uid_int <= 36 {
-				roomid = 3
+		if user.getRoom() == nil {
+			user.reset()
+			room := &Room{}
+			userIndex := 0
+			gameRule := room.GetGameRuleConfig()
+			if gameRule == GameRule_Normal {
+				//获取人数不满的房间
+				room = getVacancyRoom(matchID, roomType)
+			} else if gameRule == GameRule_Record {
+				uid := *user.getUID()
+				reg := regexp.MustCompile(`[0-9]+`)
+				uid_str := reg.FindAllString(uid, -1)
+				uid_int, _ := strconv.Atoi(strings.Join(uid_str, ""))
+				roomid := 1
+				if uid_int <= 16 {
+					roomid = 1
+				} else if uid_int <= 26 {
+					roomid = 2
+				} else if uid_int <= 36 {
+					roomid = 3
+				}
+				userIndex = uid_int % 10
+				room = RoomManage.GetRoom(strconv.Itoa(roomid))
 			}
-			userIndex = uid_int % 10
-			room = RoomManage.GetRoom(strconv.Itoa(roomid))
+			//进入此房间
+			user.enterRoom(room)
+			//坐下
+			if gameRule == GameRule_Record {
+				user.sitDownPigeon(userIndex - 1)
+			} else {
+				user.sitDownAuto()
+			}
+			//准备倒计时
+			user.countDown_setOut(time.Second * 10)
+			//推送房间的状态信息
+			room.matchingPush(nil)
 		}
-		//进入此房间
-		user.enterRoom(room)
-		//坐下
-		if gameRule == GameRule_Record {
-			user.sitDownPigeon(userIndex - 1)
-		} else {
-			user.sitDownAuto()
-		}
-		//准备倒计时
-		user.countDown_setOut(time.Second * 10)
-		//推送房间的状态信息
-		room.matchingPush(nil)
 	}
 	return &res, currentRoomID, user
 }

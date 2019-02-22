@@ -45,22 +45,18 @@ out:-2没有房间类型信息
 func getGJYXRoomInfo() *string {
 	res := "-2"
 	buff := bytes.Buffer{}
-	mapRoom := mapPCount[Match_GJYX]
 	room := Room{}
 	allRoomData := *room.getAllRoomData()
 	arrAllRoomData := strings.Split(allRoomData, "|")
+	arr := roompcountT[Match_GJYX]
 	for _, roomData := range arrAllRoomData {
 		arrRoomData_s := strings.Split(roomData, "$")
 		arrRoomData := StrArrToIntArr(arrRoomData_s)
 		roomType, enterIngot, multiple := arrRoomData[0], arrRoomData[1], arrRoomData[2]
-		pcount := mapRoom[roomType]
+		pcount := arr[roomType]
 		buff.WriteString(fmt.Sprintf("%d$%d$%d$%d|", roomType, enterIngot, multiple, pcount))
 	}
-	str := buff.String()
-	if str == "" {
-		return &res
-	}
-	res = str[:len(str)-1]
+	res = RemoveLastChar(buff)
 	return &res
 }
 
@@ -87,6 +83,8 @@ func checkEnterRoom(userid string, matchID int, x string) *string {
 		roomID := x
 		res = checkEnterHYTW(roomID)
 	} else if matchID == Match_KDFS {
+	} else if matchID == Match_HXS {
+		res = checkEnterHXS(userid)
 	}
 	return &res
 }
@@ -149,6 +147,40 @@ func checkEnterGJYX(userid string, roomType int) string {
 		res = "-5"
 		return res
 	}
+	return res
+}
+
+/*
+进入海选赛的房间
+in:房间类型
+out:-2比赛类型未开放,-4元宝数不足,-5等级不够,-6比赛次数不足,-7海选赛已截止
+	1可以进入房间
+*/
+func checkEnterHXS(userid string) string {
+	res := "1"
+	roomType := 1
+	//创建玩家
+	user := UserManage.GetUser(&userid)
+	//创建房间
+	room := Room{}
+	room.setRoomType(roomType)
+	//获取进场要求元宝数和等级
+	roomDataAudition, err := redis.Ints(room.GetRoomDataAudition("enterIngot", "level"))
+	logger.CheckFatal(err, "enterHXS")
+	enterIngot := roomDataAudition[0]
+	level := roomDataAudition[1]
+	//获取玩家元宝数
+	userIngot := user.getIngot()
+	if userIngot < enterIngot {
+		res = "-4"
+		return res
+	}
+	if user.getLevel() < level {
+		res = "-5"
+		return res
+	}
+	err2 := db.QueryRow("call AuditionUserEnter(?)", *user.getUserID()).Scan(&res)
+	logger.CheckFatal(err2, "AuditionUserEnter")
 	return res
 }
 
@@ -318,9 +350,9 @@ out:userid,cardid,第二张3出现的位置
 func GetGTW(args []string) *string {
 	userid := args[0]
 	user := UserManage.GetUser(&userid)
-	if user == nil {
-		user = UserManage.GetJudgmentUser()
-	}
+	//	if user == nil {
+	//		user = UserManage.GetJudgmentUser()
+	//	}
 	if user == nil {
 		return &Res_Unknown
 	}

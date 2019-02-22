@@ -24,8 +24,7 @@ des:比赛类型:0够级英雄,1好友同玩,2开点发四,3大奖赛
 func GetMainInfo(args []string) *string {
 	userid := args[0]
 	//创建玩家
-	user := UserManage.createUser()
-	user.setUserID(&userid)
+	user := UserManage.GetUser(&userid)
 	//头部信息
 	heroCoin := user.getHeroCoin()
 	userInfo, err2 := redis.Values(user.GetUserInfo("username", "ingot", "level", "vip"))
@@ -47,36 +46,33 @@ out:比赛类型$人数|
 des:比赛类型:0够级英雄,1好友同玩,2开点发四,3大奖赛
 */
 func getAllMatchInfo() *string {
-	res := Res_Unknown
+	info := Res_Unknown
 	key := "allMatchInfo"
 	gameRds := getGameRds()
 	defer gameRds.Close()
 	fromDB := func() {
-
 		buff := bytes.Buffer{}
-		matchID, status, count := 0, 0, 0
-		rows, err := db.Query("select matchID,status,pcount from matchinfo")
+		matchID, status := 0, 0
+		rows, err := db.Query("select matchID,status from matchinfo")
 		logger.CheckFatal(err, "getAllMatchInfo")
 		defer rows.Close()
 		for rows.Next() {
-			rows.Scan(&matchID, &status, &count)
+			rows.Scan(&matchID, &status)
 			//比赛类型已开启
 			if status == 1 {
-				buff.WriteString(fmt.Sprintf("%d$%d|", matchID, count))
+				buff.WriteString(fmt.Sprintf("%d$%d|", matchID, matchpcountT[matchID]))
 			}
 		}
-		res = buff.String()
-		res = res[:len(res)-1]
-
-		gameRds.Do("set", key, res)
+		info = *RemoveLastChar(buff)
+		gameRds.Do("set", key, info)
 		gameRds.Do("expire", key, expireSecond)
 	}
 	var err error
-	res, err = redis.String(gameRds.Do("get", key))
+	info, err = redis.String(gameRds.Do("get", key))
 	if err != nil {
 		fromDB()
 	}
-	return &res
+	return &info
 }
 
 /*

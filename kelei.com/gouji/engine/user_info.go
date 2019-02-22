@@ -6,20 +6,18 @@ package engine
 
 import (
 	"bytes"
-	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/garyburd/redigo/redis"
 	"github.com/mikemintang/go-curl"
 
 	. "kelei.com/utils/common"
-	"kelei.com/utils/frame"
 	"kelei.com/utils/logger"
-	"kelei.com/utils/rpcs"
 )
 
 const (
@@ -105,32 +103,29 @@ func (u *User) topBar(title, info string) {
 =========================================================================================================
 */
 
+func (u *User) getUserMatchKey() string {
+	return fmt.Sprintf("usermatch:%s", *u.getUserID())
+}
+
 //向负载均衡服务器插入此玩家的比赛信息，用来重新进入
 func (u *User) insertUserInfo() {
-	userid := *u.getUserID()
 	room := u.getRoom()
 	roomid := room.id
 	matchid := strconv.Itoa(room.GetMatchID())
 	roomtype := strconv.Itoa(room.GetRoomType())
-	xclient := frame.NewRpcxClient(frame.GetArgs().RpcxClient)
-	defer xclient.Close()
-	args := &rpcs.Args{}
-	args.V = map[string]interface{}{"args": []string{userid, addr, roomid, matchid, roomtype}}
-	reply := &rpcs.Reply{}
-	err := xclient.Call(context.Background(), "InsertUserInfo", args, reply)
-	logger.CheckError(err, "insertUserInfo")
+	rds := getGameRds()
+	defer rds.Close()
+	key := u.getUserMatchKey()
+	rds.Do("hmset", key, "gameaddr", addr, "roomid", roomid, "matchid", matchid, "roomtype", roomtype)
+	rds.Do("expire", key, time.Second*60*10)
 }
 
 //从负载均衡服务器删除此玩家的比赛信息
 func (u *User) deleteUserInfo() {
-	userid := *u.getUserID()
-	xclient := frame.NewRpcxClient(frame.GetArgs().RpcxClient)
-	defer xclient.Close()
-	args := &rpcs.Args{}
-	args.V = map[string]interface{}{"args": []string{userid}}
-	reply := &rpcs.Reply{}
-	err := xclient.Call(context.Background(), "DeleteUserInfo", args, reply)
-	logger.CheckError(err, "deleteUserInfo")
+	rds := getGameRds()
+	defer rds.Close()
+	key := u.getUserMatchKey()
+	rds.Do("expire", key, 0)
 }
 
 /*
@@ -329,6 +324,19 @@ func (u *User) updateCharm(value int) {
 }
 
 /*
+更新玩家晋级券
+in:
+out:1
+*/
+func (u *User) updatePromotionTicker(value int) {
+	db.QueryRow("call PromotionTickerUpdate(?,?)", *u.getUserID(), value)
+	//	gameRds := getGameRds()
+	//	defer gameRds.Close()
+	//	//设置键过期
+	//	gameRds.Do("expire", u.getKey(), 0)
+}
+
+/*
 	魅力值清零
 */
 func (u *User) resetCharm() {
@@ -440,6 +448,15 @@ func (u *User) endUpdateUserInfo(mapInfo map[string]int) {
 	gameRds.Do("expire", u.getHonorInfoKey(HonorType_3), 0)
 	gameRds.Do("expire", u.getHonorInfoKey(HonorType_4), 0)
 	gameRds.Do("expire", u.getHonorInfoKey(HonorType_6), 0)
+}
+
+/*
+比赛结束(海选赛)-更新玩家数据
+in:积分、MatchResult
+*/
+func (u *User) auditionEndUpdateUserInfo(win int, tickerCount int) {
+	_, err := db.Exec("call MatchEndAudition(?,?,?)", *u.getUserID(), win, tickerCount)
+	logger.CheckFatal(err, "auditionEndUpdateUserInfo")
 }
 
 /*
@@ -589,19 +606,36 @@ func (u *User) useItem(baginfoid int, count uint, args ...string) string {
 	if len(args) > 0 {
 		info = args[0]
 	}
-
 	//执行存储过程
 	res := 0
 	res_iteminfo := ""
 	err := db.QueryRow("call ItemHandle(?,?,?,?,?,?,?)", Procedure_Return, ItemHandle_Use, *u.getUserID(), baginfoid, count, 1, info).Scan(&res, &res_iteminfo)
 	logger.CheckFatal(err, "useItem")
+	//夸库的数据处理
+	u.crossDBHandle(res_iteminfo)
+	//设置redis键过期
 	gameRds := getGameRds()
 	defer gameRds.Close()
-	//设置键过期
 	gameRds.Do("expire", u.getKey(), 0)
 	gameRds.Do("expire", u.getBagInfoKey(), 0)
 	gameRds.Do("expire", u.getHonorInfoKey(HonorType_5), 0)
 	return fmt.Sprintf("%d,%s", res, res_iteminfo)
+}
+
+//夸库的数据处理
+func (u *User) crossDBHandle(res_iteminfo string) {
+	if res_iteminfo != "" {
+		items := strings.Split(res_iteminfo, "$")
+		for _, itemStr := range items {
+			item_s := strings.Split(itemStr, "|")
+			item := StrArrToIntArr(item_s)
+			itemid := item[0]
+			count := item[1]
+			if itemid == 20002 { //英雄币
+				u.updateHeroCoin(count, 2)
+			}
+		}
+	}
 }
 
 /*

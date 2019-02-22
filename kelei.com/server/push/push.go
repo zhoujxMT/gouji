@@ -67,7 +67,7 @@ func handle() {
 	if frame.GetMode() == frame.MODE_RELEASE {
 		defer func() {
 			if p := recover(); p != nil {
-				logger.Errorf("[recovery] Server_Init : %v", p)
+				logger.Errorf("[recovery] handle : %v", p)
 			}
 		}()
 	}
@@ -97,7 +97,7 @@ func broadcast() {
 	if frame.GetMode() == frame.MODE_RELEASE {
 		defer func() {
 			if p := recover(); p != nil {
-				logger.Errorf("[recovery] Server_Init : %v", p)
+				logger.Errorf("[recovery] broadcast : %v", p)
 			}
 		}()
 	}

@@ -31,17 +31,19 @@ func EnterHYTW(args []string) (*string, string, *User) {
 	roomid := args[2]
 	user := UserManage.GetUser(&userid)
 	if currentRoomID == "-1" { //不在比赛中
-		room := RoomManage.GetRoom(roomid)
-		//房间不存在
-		if room == nil {
-			res = "-1"
-			return &res, currentRoomID, nil
+		if user.getRoom() == nil {
+			room := RoomManage.GetRoom(roomid)
+			//房间不存在
+			if room == nil {
+				res = "-1"
+				return &res, currentRoomID, nil
+			}
+			user.reset()
+			user.enterRoom(room)
+			user.setStatus(UserStatus_NoSitDown)
+			//推送房间的状态信息
+			room.matchingPush(nil)
 		}
-		user.reset()
-		user.enterRoom(room)
-		user.setStatus(UserStatus_NoSitDown)
-		//推送房间的状态信息
-		room.matchingPush(nil)
 	}
 	return &res, currentRoomID, user
 }

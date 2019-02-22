@@ -23,7 +23,7 @@ func loadRedis() {
 	for _, redisDSN := range redisDSNs {
 		logger.Infof("[连接Redis %s]", redisDSN.Addr)
 		rdses[redisDSN.Name] = redis.NewPool(redisDSN)
-		GetRedis().Do("flushall")
+		//		GetRedis().Do("flushall")
 	}
 }
 

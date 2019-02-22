@@ -33,9 +33,25 @@ local balancedata = function(content)
 	end
 end
 
+local auditionbalancedata = function(content)
+	local rows = split(content,"|")
+	local infos = ""
+	local key = ""
+	local roomType, balanceType, ingot, integral
+	for i,row in ipairs(rows) do
+		infos = split(row,",")
+		roomType, balanceType, ingot, integral = infos[1], infos[2], infos[3], infos[4]
+		key = "audition:roomT:"..roomType..":blceT:"..balanceType
+		redis.call("hmset", key, "ingot", ingot, "integral", integral)
+		redis.call("expire", key, expireSecond)
+	end
+end
+
 for i,funcName in ipairs(KEYS) do
 	local content = ARGV[i]
 	if funcName=="balancedata" then
 		balancedata(content)
+	elseif funcName=="auditionbalancedata" then
+		auditionbalancedata(content)
 	end
 end

@@ -12,16 +12,10 @@ import (
 	"kelei.com/utils/mysql"
 )
 
-//var (
-//	addr        = flag.String("addr", "localhost:10101", "http address")
-//	lbAddr      = flag.String("lbAddr", "localhost:10100", "loadbalancer address")
-//	memberDB    = flag.String("memberDB", "member,root,111111,127.0.0.1:3306,richman_member", "member db")
-//	certificate = flag.String("certificate", "", "https certificate")
-//)
-
 var (
 	addr        = flag.String("addr", "localhost:9480", "http address")
-	lbAddr      = flag.String("lbAddr", "localhost:9350", "loadbalancer address")
+	etcdAddr    = flag.String("etcdAddr", "localhost:2379", "etcd address")
+	basePath    = flag.String("base", "/rpcx", "prefix path")
 	memberDB    = flag.String("memberDB", "member,root,111111,127.0.0.1:3306,gouji_nmmember", "member db")
 	certificate = flag.String("certificate", "", "https certificate")
 )
@@ -40,11 +34,14 @@ func main() {
 	args := frame.Args{}
 	args.ServerName = "login"
 	args.Commands = cmds.GetCmds()
+	//http服务
 	args.HttpGin = &frame.HttpGin{Addr: *addr, Modes: loadModes(), Certificate: *certificate}
-	args.RpcxClient = &frame.RpcxClient{frame.Discovery_Peer2Peer, frame.Rpcx{lbAddr, nil, nil, nil}, "LoadbalancerS", frame.UNIDIRECTIONAL}
+	//gate的客户端
+	args.RpcxClient = &frame.RpcxClient{frame.Discovery_Etcd, frame.Rpcx{nil, nil, etcdAddr, basePath}, "GateS", frame.UNIDIRECTIONAL}
+	//mysql
 	sqlDSNs := []*mysql.SqlDSN{mysql.AnalysisFlag2SqlDSN(memberDB)}
 	args.Sql = &frame.Sql{sqlDSNs}
-	args.Loaded = start
+	//通过参数启动框架
 	frame.Load(args)
 }
 
@@ -52,7 +49,4 @@ func loadModes() frame.Modes {
 	modes := frame.Modes{}
 	modes["Login"] = &Login{}
 	return modes
-}
-
-func start() {
 }

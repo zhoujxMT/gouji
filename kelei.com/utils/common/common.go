@@ -63,7 +63,7 @@ func IndexStringOf(arr []string, val *string) int {
 	return -1
 }
 
-//将字符串的index数组转化成数字index数组
+//将字符串数组转化成数字数组
 func StrArrToIntArr(strArr []string) []int {
 	intArr := make([]int, len(strArr))
 	for i, str := range strArr {
@@ -71,6 +71,22 @@ func StrArrToIntArr(strArr []string) []int {
 		intArr[i] = j
 	}
 	return intArr
+}
+
+//将字符串转化成数字
+func StrToInt(str string) int {
+	i, _ := strconv.Atoi(str)
+	return i
+}
+
+//将数字数组转化成字符串数组
+func IntArrToStrArr(intArr []int) []string {
+	strArr := make([]string, len(intArr))
+	for i, v := range intArr {
+		j := strconv.Itoa(v)
+		strArr[i] = j
+	}
+	return strArr
 }
 
 //测试消耗时间

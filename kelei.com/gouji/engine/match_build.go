@@ -15,9 +15,17 @@ import (
 
 /*
 匹配房间
-in:比赛类型,X(够级英雄:roomType,好友同玩:roomid),mode
-out:-2比赛类型未开放,-3房间类型未开放,-4元宝数不足,-5等级不够,-6房间不存在
-	1匹配成功 2残局
+in:比赛类型,X,匹配方式
+out:
+	【够级英雄 & 好友同玩】
+		-2比赛类型未开放,-3房间类型未开放,-4元宝数不足,-5等级不够,-6房间不存在
+		1匹配成功 2残局
+	【海选赛】
+		-2比赛类型未开放
+		1匹配成功 2残局
+des:比赛类型(0够级英雄1好友同玩2海选赛)
+	X(够级英雄:roomType,好友同玩:roomid,海选赛:0)
+	匹配方式(0匹配1匹配>进入>准备2匹配>进入)
 */
 func Matching(args []string) *string {
 	userid := args[0]
@@ -38,6 +46,11 @@ func Matching(args []string) *string {
 	res := Res_Succeed
 	if mode == MatchingMode_Normal {
 		res = *checkEnterRoom(userid, matchID, x)
+		res_int, _ := strconv.Atoi(res)
+		//海选赛只需要判断是否开放就可进入
+		if matchID == Match_HXS && res_int < -2 {
+			res = "1"
+		}
 	} else if mode == MatchingMode_Enter {
 		res = *EnterRoom(args)
 	} else if mode == MatchingMode_EnterAndSetout {
@@ -52,9 +65,16 @@ func Matching(args []string) *string {
 
 /*
 进入房间
-in:比赛类型,x(够级英雄:roomtype,好友同玩:roomid)
-out:-2比赛类型未开放,-3房间类型未开放,-4元宝数不足,-5等级不够,-6房间不存在(退出房间)
-	1成功匹配
+in:比赛类型,X
+out:
+	【够级英雄 & 好友同玩】
+		-2比赛类型未开放,-3房间类型未开放,-4元宝数不足,-5等级不够,-6房间不存在
+		1匹配成功 2残局
+	【海选赛】
+		-2比赛类型未开放,-4元宝数不足,-5等级不够,-6比赛次数不足,-7海选赛已截止
+		1匹配成功 2残局
+des:比赛类型(0够级英雄1好友同玩2海选赛)
+	X(够级英雄:roomType,好友同玩:roomid,海选赛:0)
 */
 func EnterRoom(args []string) *string {
 	var res *string
@@ -67,6 +87,8 @@ func EnterRoom(args []string) *string {
 		res, currentRoomID, user = EnterGJYX(args)
 	} else if matchID == Match_HYTW {
 		res, currentRoomID, user = EnterHYTW(args)
+	} else if matchID == Match_HXS {
+		res, currentRoomID, user = EnterHXS(args)
 	}
 	//在房间中
 	if currentRoomID != "-1" {
@@ -114,7 +136,7 @@ func ChangeTable(args []string) *string {
 	//退出当前房间
 	user.exitRoom()
 	//进入新房间
-	EnterGJYX([]string{userid, "-1", strconv.Itoa(matchID), strconv.Itoa(roomType)})
+	EnterGJYX([]string{userid, strconv.Itoa(matchID), strconv.Itoa(roomType), strconv.Itoa(MatchingMode_Enter), "-1"})
 	res = *user.getRoom().GetRoomID()
 	return &res
 }
@@ -137,18 +159,19 @@ func ClientConnClose(args []string) *string {
 
 //裁判关闭连接的方法
 func closeJudgment(userid *string) bool {
-	user := UserManage.GetJudgmentUser()
+	user := UserManage.GetUser(userid)
 	if user == nil {
 		return false
 	}
+	judgmentUser := user.getRoom().getJudgmentUser()
 	//不是裁判关闭连接
-	if *user.getUserID() != *userid {
+	if judgmentUser != user {
 		return false
 	}
 	//裁判离场
-	if user.getUserType() == TYPE_JUDGMENT {
+	if judgmentUser.getUserType() == TYPE_JUDGMENT {
 		logger.Debugf("裁判关闭连接的方法")
-		room := user.getRoom()
+		room := judgmentUser.getRoom()
 		room.pause()
 		return true
 	}
@@ -244,14 +267,19 @@ func Setout(args []string) *string {
 		res := "-1"
 		return &res
 	}
-	//只有没准备的情况下，才可以准备（重新进应用）
+	//只有没准备的情况下，才可以准备
 	if user.getStatus() == UserStatus_NoSetout {
 		user.setStatus(UserStatus_Setout)
 		user.close_countDown_setOut()
 		room := user.getRoom()
 		if room != nil {
-			//推送房间的状态信息
-			room.matchingPush(nil)
+			if room.GetMatchID() == Match_HXS {
+				//推送海选赛匹配信息(没进入房间)
+				room.matchingHXSPush(nil)
+			} else {
+				//推送房间的状态信息(已进入房间)
+				room.matchingPush(nil)
+			}
 			//判断玩家准备的情况,决定是否开局
 			count := room.getSetoutCount()
 			if count >= pcount {
@@ -262,4 +290,25 @@ func Setout(args []string) *string {
 	}
 	res := "1"
 	return &res
+}
+
+/*
+获取座位状态的推送
+in:
+out:1成功,其它失败
+push:Matching_Push,64$1$0$5$0|||||#等待席#当前轮次
+*/
+func GetMatchingPush(args []string) *string {
+	userid := &args[0]
+	user := UserManage.GetUser(userid)
+	if user == nil {
+		return &Res_Unknown
+	}
+	room := user.getRoom()
+	if room == nil {
+		return &Res_Unknown
+	}
+	//推送房间的状态信息
+	room.matchingPush(user)
+	return &Res_Succeed
 }

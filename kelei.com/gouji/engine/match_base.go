@@ -91,7 +91,7 @@ var (
 			}
 		}
 		//描述
-		//		arr := []string{"", "黑桃", "红桃", "梅花", "方块"}
+		//		arr := []string{"", "红桃", "方块", "黑桃", "梅花"}
 		//		for _, card := range deck.Cards {
 		//			strSuit := arr[card.Suit]
 		//			fmt.Printf("%s%d(%d-%d-%d-%d)\n", strSuit, card.Value, card.ID, card.Value, card.Suit, card.Priority)

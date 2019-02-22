@@ -29,7 +29,9 @@ type Event struct {
 
 var (
 	events = []Event{
-		Event{"resetRanking", "Wednesday", "10:27:10", resetRanking, "重置排名{event resetRanking,Wednesday,11:01:00}"},
+		Event{"resetRanking", "Monday", "00:00:00", resetRanking, "重置排名{event resetRanking,Monday,00:00:00}"},
+		Event{"auditionClose", "Monday", "00:00:00", auditionClose, "海选赛截止{event auditionClose,Monday,00:00:00}"},
+		Event{"auditionNewRound", "Monday", "10:59:00", auditionNewRound, "海选赛新一轮{event auditionNewRound,Monday,10:59:00}"},
 	}
 )
 
@@ -62,7 +64,7 @@ func handle() {
 	if frame.GetMode() == frame.MODE_RELEASE {
 		defer func() {
 			if p := recover(); p != nil {
-				logger.Errorf("[recovery] Server_Init : %v", p)
+				logger.Errorf("[recovery] handle : %v", p)
 			}
 		}()
 	}
@@ -83,4 +85,22 @@ func handle() {
 func resetRanking() {
 	fmt.Println("重置排行")
 	db.Exec("update ranking set win=0,charm=0")
+}
+
+/*
+海选赛截止
+*/
+func auditionClose() {
+	fmt.Println("海选赛截止")
+	_, err := db.Exec("call AuditionClose()")
+	logger.CheckError(err)
+}
+
+/*
+海选赛新一轮
+*/
+func auditionNewRound() {
+	fmt.Println("海选赛新一轮")
+	_, err := db.Exec("call AuditionNewRound()")
+	logger.CheckError(err)
 }

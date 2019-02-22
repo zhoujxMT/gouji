@@ -6,6 +6,7 @@ package engine
 
 import (
 	"strconv"
+	"time"
 
 	. "kelei.com/utils/common"
 	"kelei.com/utils/logger"
@@ -58,7 +59,7 @@ func (u *User) revolution(isRevolution bool) string {
 	} else { //不革命
 		u.setStatus(UserStatus_NoPass)
 	}
-	//	time.Sleep(time.Second)
+	time.Sleep(time.Millisecond * 40)
 	//检测比赛开始
 	u.getRoom().check_start()
 	return res

@@ -21,12 +21,20 @@ import (
 	"kelei.com/utils/logger"
 )
 
+var (
+	goodCard_KingCount = 5
+	goodCard_TwoCount  = 8
+)
+
 //获取等待革命的玩家列表
 func (r *Room) getTributeUsers() {
 
 }
 
-//推送房间的状态信息
+/*
+推送房间的状态信息
+push:Matching_Push,64$1$0$5$0|||||#等待席#当前轮次
+*/
 func (r *Room) matchingPush(user *User) {
 	//获取此房间的信息
 	userids, statuss := r.getRoomMatchingInfo()
@@ -35,6 +43,19 @@ func (r *Room) matchingPush(user *User) {
 	}
 	pushMessageToUsers("Matching_Push", statuss, userids)
 	r.pushJudgment("Matching_Push", statuss[0])
+}
+
+/*
+推送海选赛匹配信息
+push:MatchingHXS_Push,64$1$0$5$0|||||#等待席#当前轮次
+*/
+func (r *Room) matchingHXSPush(user *User) {
+	//获取此房间的信息
+	userids, statuss := r.getRoomMatchingInfo()
+	if user != nil {
+		userids = []string{*user.getUserID()}
+	}
+	pushMessageToUsers("MatchingHXS_Push", statuss, userids)
 }
 
 /*
@@ -63,7 +84,8 @@ func (r *Room) goPush(user *User) {
 所有人开启准备倒计时
 */
 func (r *Room) setOutCountDown() {
-	if r.GetMatchID() == Match_HYTW {
+	matchid := r.GetMatchID()
+	if matchid == Match_HYTW || matchid == Match_HXS {
 		return
 	}
 	users := r.getUsers()
@@ -88,8 +110,24 @@ func (r *Room) initUsersInfo() {
 
 //开局
 func (r *Room) opening() {
-	//不是录制版
-	if r.getGameRule() != GameRule_Record {
+	//是录制版
+	if r.getGameRule() == GameRule_Record {
+		return
+	}
+	//海选赛延迟开赛
+	if r.GetMatchID() == Match_HXS {
+		go func() {
+			defer func() {
+				if p := recover(); p != nil {
+					errInfo := fmt.Sprintf("opening : { %v }", p)
+					logger.Errorf(errInfo)
+				}
+			}()
+			time.Sleep(time.Second * 4)
+			//比赛开局
+			r.match_Opening()
+		}()
+	} else {
 		//比赛开局
 		r.match_Opening()
 	}
@@ -99,6 +137,12 @@ func (r *Room) opening() {
 func (r *Room) deal() {
 	r.match_Opening()
 	go func() {
+		defer func() {
+			if p := recover(); p != nil {
+				errInfo := fmt.Sprintf("deal : { %v }", p)
+				logger.Errorf(errInfo)
+			}
+		}()
 		pushMessageToUsers("Deal_Push", []string{"1"}, r.getUserIDs())
 	}()
 }
@@ -136,6 +180,12 @@ func (r *Room) match_Opening() {
 	//设置房间为发牌状态
 	r.SetRoomStatus(RoomStatus_Deal)
 	go func() {
+		defer func() {
+			if p := recover(); p != nil {
+				errInfo := fmt.Sprintf("match_Opening : { %v }", p)
+				logger.Errorf(errInfo)
+			}
+		}()
 		//等待发牌
 		if r.GetMatchID() == Match_GJYX {
 			time.Sleep(time.Second * 10)
@@ -168,12 +218,12 @@ func (r *Room) Opening_Push() {
 	//	CostTime(func() {
 	//		for {
 	//			count++
-	//			cardsList = r.generateCards()
+	//			cardsList, _ = r.generateCards()
 	//			if len(cardsList) > 0 {
 	//				break
 	//			}
 	//		}
-	//	}, 1000, "发牌")
+	//	}, 100, "发牌")
 	//	fmt.Println("100场发牌总次数：", count)
 	//	return
 	for {
@@ -235,16 +285,23 @@ func (r *Room) check_start() {
 				revolutionCount += 1
 			}
 		}
-		//革命人数超过两人,流局
-		if revolutionCount >= 2 && r.GetRoomStatus() == RoomStatus_Revolution {
+		liuju := func() {
 			canStart = false
 			r.SetRoomStatus(RoomStatus_Liuju)
 			logger.Debugf("流局")
 			users[0].setCtlUsers("", "", SetController_Liuju)
+			r.setMatchingStatus(MatchingStatus_Over)
 			time.Sleep(time.Second * 2)
 			r.SetRoomStatus(RoomStatus_Setout)
-			//重开牌局
-			r.match_Opening()
+		}
+		//革命人数超过两人,流局
+		isLiuju := revolutionCount >= 2 && r.GetRoomStatus() == RoomStatus_Revolution
+		if isLiuju {
+			liuju()
+			if r.getGameRule() != GameRule_Record {
+				//重开牌局
+				r.match_Opening()
+			}
 		}
 		if canStart {
 			r.SetRoomStatus(RoomStatus_Setout)
@@ -272,10 +329,32 @@ func (r *Room) begin() {
 	if r.GetRoomStatus() != RoomStatus_Deal {
 		return
 	}
+	fmt.Println("xxxxx")
 	r.opening_handle()
+	r.SetRoomStatus(RoomStatus_Revolution)
+	r.setMatchingStatus(MatchingStatus_Run)
 	pushMessageToUsers("Begin_Push", []string{"1"}, r.getUserIDs())
-	time.Sleep(time.Second * 10)
-	r.start()
+	go func() {
+		defer func() {
+			if p := recover(); p != nil {
+				errInfo := fmt.Sprintf("begin : { %v }", p)
+				logger.Errorf(errInfo)
+			}
+		}()
+		i := 0
+		for {
+			time.Sleep(time.Second)
+			if r.getMatchingStatus() == MatchingStatus_Run {
+				i++
+				if i >= 10 {
+					break
+				}
+			} else if r.getMatchingStatus() == MatchingStatus_Over {
+				return
+			}
+		}
+		r.start()
+	}()
 }
 
 //开赛
@@ -305,6 +384,7 @@ func (r *Room) checkMatchPause(user *User) {
 			push:[Online_Push] userid|status
 			des:status=0离线 status=1回来
 		*/
+		user.setOnline(false)
 		r.pushJudgment("Online_Push", fmt.Sprintf("%s|%d", *user.getUserID(), 0))
 	}
 }
@@ -316,26 +396,50 @@ func (r *Room) pause() {
 	}
 	pushMessageToUsers("Pause_Push", []string{"1"}, r.getUserIDs())
 	r.pushJudgment("Pause_Push", "1")
+	r.pause_revolution()
 	r.setMatchingStatus(MatchingStatus_Pause)
 	logger.Debugf("暂停")
-	controllerUser := r.getControllerUser()
-	if controllerUser == nil {
-		return
+	for _, user := range r.getUsers() {
+		if user != nil {
+			user.pause()
+		}
 	}
-	controllerUser.pause()
+}
+
+//暂停革命
+func (r *Room) pause_revolution() {
+	if r.GetRoomStatus() == RoomStatus_Revolution {
+		for _, user := range r.getUsers() {
+			if user.getStatus() == UserStatus_WaitRevolution {
+				user.pause()
+			}
+		}
+	}
 }
 
 //恢复
 func (r *Room) resume() {
 	pushMessageToUsers("Resume_Push", []string{"1"}, r.getUserIDs())
 	r.pushJudgment("Resume_Push", "1")
+	r.resume_revolution()
 	r.setMatchingStatus(MatchingStatus_Run)
 	logger.Debugf("恢复")
-	controllerUser := r.getControllerUser()
-	if controllerUser == nil {
-		return
+	for _, user := range r.getUsers() {
+		if user != nil {
+			user.resume()
+		}
 	}
-	controllerUser.resume()
+}
+
+//恢复革命
+func (r *Room) resume_revolution() {
+	if r.GetRoomStatus() == RoomStatus_Revolution {
+		for _, user := range r.getUsers() {
+			if user.getStatus() == UserStatus_WaitRevolution {
+				user.resume()
+			}
+		}
+	}
 }
 
 //解散牌局
@@ -349,6 +453,7 @@ func (r *Room) dissolve() {
 	}
 	r.deleteUsersInfo()
 	r.SetRoomStatus(RoomStatus_Setout)
+	r.setMatchingStatus(MatchingStatus_Over)
 	logger.Debugf("解散牌局")
 }
 
@@ -357,6 +462,34 @@ func (r *Room) resetUsersRanking() {
 	for _, user := range r.getUsers() {
 		user.ranking = -1
 	}
+}
+
+//获取王的数量
+func (r *Room) getCountWithKing(cards CardList) int {
+	count := 0
+	for _, card := range cards {
+		if card.Priority == Priority_SKing || card.Priority == Priority_BKing {
+			count++
+		} else {
+			break
+		}
+	}
+	return count
+}
+
+//获取2的数量
+func (r *Room) getCountWithTwo(cards CardList) int {
+	count := 0
+	for _, card := range cards {
+		if card.Priority >= Priority_Two {
+			if card.Priority == Priority_Two {
+				count++
+			}
+		} else {
+			break
+		}
+	}
+	return count
 }
 
 //获取大于10的牌的数量
@@ -482,14 +615,34 @@ func (r *Room) generateCards() ([]CardList, []CardList) {
 			cardLists[i][j] = card
 		}
 	}
+	kingCount := 0
+	twoCount := 0
 	for i := 0; i < pcount; i++ {
 		sort.Sort(cardLists[i])
 		//玩家初始牌是完整的情况下，判断大于11的牌的数量
-		if r.initCardCountIsIntegrity() && r.getCountWithGreaterThanTen(cardLists[i]) < 11 {
-			return []CardList{}, []CardList{}
+		if r.initCardCountIsIntegrity() {
+			if r.getCountWithGreaterThanTen(cardLists[i]) < 11 {
+				return []CardList{}, []CardList{}
+			}
+			if r.getDealMode() == DEAL_RED {
+				if r.getUserByIndex(i).getTeamMark() == TeamMark_Red {
+					kingCount += r.getCountWithKing(cardLists[i])
+					twoCount += r.getCountWithTwo(cardLists[i])
+				}
+			} else if r.getDealMode() == DEAL_BLUE {
+				if r.getUserByIndex(i).getTeamMark() == TeamMark_Blue {
+					kingCount += r.getCountWithKing(cardLists[i])
+					twoCount += r.getCountWithTwo(cardLists[i])
+				}
+			}
 		}
 		for k := 0; k < len(cardLists[i]); k++ {
 			cardLists[i][k].Index = k
+		}
+	}
+	if r.getDealMode() != DEAL_NORMAL {
+		if kingCount < goodCard_KingCount || twoCount < goodCard_TwoCount {
+			return []CardList{}, []CardList{}
 		}
 	}
 	if r.isGtwMode() { //是上班模式
@@ -553,7 +706,7 @@ func (r *Room) getGTW() string {
 func (r *Room) handleGenerateCards(cardLists []CardList) []CardList {
 	userStrs := make([]string, pcount)
 	for i := 0; i < revolutionCount; i++ {
-		//		userStrs[i] = "2-1-1-12|2-1-1-12|10-9-1-7"
+		//		userStrs[i] = "0-15-0-15|0-15-0-15|1-14-0-14|1-14-0-14|3-2-1-13|3-2-1-13|3-2-1-13|2-1-1-12|2-1-1-12|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|13-12-1-10|13-12-1-10|11-10-1-8|11-10-1-8|11-10-1-8|9-8-1-6|5-4-1-2|5-4-1-2|5-4-1-2|5-4-1-2|5-4-1-2|5-4-1-2|5-4-1-2|5-4-1-2|5-4-1-2|5-4-1-2|5-4-1-2|5-4-1-2|5-4-1-2|5-4-1-2|5-4-1-2"
 		userStrs[i] = "14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11|14-13-1-11"
 	}
 	//	for i := 0; i < 6; i++ {
@@ -763,7 +916,7 @@ func (r *Room) revolutionHandle() {
 	}
 	//有可以革命的人
 	if len(revolutionUsers) > 0 {
-		//房间更新为革命状态
+		//房间正在等待革命
 		r.SetRoomStatus(RoomStatus_Revolution)
 		for _, user := range users {
 			status := UserStatus_WaitOtherRevolution

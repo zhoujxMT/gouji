@@ -164,8 +164,7 @@ func baseCardLessTwo(currentCards []Card, cards []Card, lintCards []Card) []Card
 		}
 	}
 	cardsInfo := getCardsInfo(baseCard, baseCardCount, cards)
-	equalCards := cardsInfo["equal"]
-
+	//设置提示的牌
 	setLintCards := func(cards []Card) {
 		for _, card := range cards {
 			lintCards = append(lintCards, card)
@@ -231,11 +230,13 @@ func baseCardLessTwo(currentCards []Card, cards []Card, lintCards []Card) []Card
 		}
 		return true
 	}
+
+	equalCards := cardsInfo["equal"]
 	//有数量相等的
 	if equalCards != nil {
-		//如果是王,查找挂拆有没有合适的牌
-		if len(equalCards) > 1 && equalCards[0].Priority > Priority_Two {
-			//挂拆没有合适的牌,还是用王
+		//如果是>=2的牌,查找挂拆有没有合适的牌
+		if equalCards[0].Priority >= Priority_Two && len(equalCards) > 1 {
+			//挂拆没有合适的牌,还是用>=2的牌
 			if notEqual() == false {
 				setLintCards(equalCards)
 			}

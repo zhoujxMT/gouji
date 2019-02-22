@@ -10,18 +10,8 @@ import (
 	"kelei.com/utils/frame"
 	"kelei.com/utils/logger"
 	"kelei.com/utils/mysql"
+	"kelei.com/utils/redis"
 )
-
-//var (
-//	addr          = flag.String("addr", "localhost:10110", "server address")
-//	foreignAddr   = flag.String("foreignAddr", "localhost:10110", "server address")
-//	etcdAddr      = flag.String("etcdAddr", "localhost:2379", "etcd address")
-//	basePath      = flag.String("base", "/rpcx", "prefix path")
-//	wsAddr        = flag.String("wsAddr", "localhost:11201", "server address")
-//	wsForeignAddr = flag.String("wsForeignAddr", "localhost:11201", "server address")
-//	gameDB        = flag.String("gameDB", "game,root,111111,127.0.0.1:3306,richman_game", "")
-//	memberDB      = flag.String("memberDB", "member,root,111111,127.0.0.1:3306,richman_member", "")
-//)
 
 var (
 	addr          = flag.String("addr", "localhost:9250", "server address")
@@ -33,7 +23,7 @@ var (
 	certificate   = flag.String("certificate", "", "certificate")
 	gameDB        = flag.String("gameDB", "game,root,111111,127.0.0.1:3306,gouji_game", "")
 	memberDB      = flag.String("memberDB", "member,root,111111,127.0.0.1:3306,gouji_nmmember", "")
-	lbDB          = flag.String("lbDB", "loadbalancer,root,111111,127.0.0.1:3306,gouji_loadbalancer", "")
+	gameRedis     = flag.String("gameRedis", "localhost:9100", "")
 )
 
 func main() {
@@ -50,23 +40,23 @@ func main() {
 	args := frame.Args{}
 	args.ServerName = "gate"
 	args.Commands = cmds.GetCmds()
-	//loadbalancer的服务端
+	//login的服务端
 	args.RpcxServer = &frame.RpcxServer{frame.Discovery_Etcd, frame.Rpcx{Addr: addr, ForeignAddr: foreignAddr, EtcdAddr: etcdAddr, BasePath: basePath}, []interface{}{new(rpcs.GateS)}}
-	//richman的客户端
+	//游戏服务器的客户端
 	args.RpcxClient = &frame.RpcxClient{frame.Discovery_Etcd, frame.Rpcx{EtcdAddr: etcdAddr, BasePath: basePath}, "GoujiS", frame.BIDIRECTIONAL}
+	//redis
+	redisDSNs := []*redis.RedisDSN{}
+	redisDSNs = append(redisDSNs, &redis.RedisDSN{"game", *gameRedis, ""})
+	args.Redis = &frame.Redis{redisDSNs}
 	//mysql
 	sqlDSNs := []*mysql.SqlDSN{}
 	sqlDSNs = append(sqlDSNs, mysql.AnalysisFlag2SqlDSN(gameDB))
 	sqlDSNs = append(sqlDSNs, mysql.AnalysisFlag2SqlDSN(memberDB))
-	sqlDSNs = append(sqlDSNs, mysql.AnalysisFlag2SqlDSN(lbDB))
 	args.Sql = &frame.Sql{sqlDSNs}
 	//websocket
 	args.WebSocket = &frame.WebSocket{*wsAddr, *wsForeignAddr, *certificate, HandleClientData}
-	args.Loaded = start
+	//通过参数启动框架
 	frame.Load(args)
-}
-
-func start() {
 }
 
 /*

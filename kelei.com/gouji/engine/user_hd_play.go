@@ -102,7 +102,7 @@ func PlayCard(args []string) *string {
 		return &res
 	}
 	//将牌打出之后,后续的操作
-	time.Sleep(time.Millisecond * 10)
+	time.Sleep(time.Millisecond * 20)
 	user.playAfter(play_cards)
 	user.setFirstSetAfterBurn(false)
 	return &res
@@ -249,6 +249,11 @@ func (u *User) recordPlayCard(play_cards []Card) {
 //打出之后
 func (u *User) playAfter(playCards []Card) {
 	room := u.getRoom()
+	if room == nil {
+		return
+	}
+	//初始话房间为默认值
+	room.setBurnStatus(BurnStatus_Burn)
 	//比赛结束
 	if !u.isMatching() {
 		return
@@ -271,27 +276,12 @@ func (u *User) playAfter(playCards []Card) {
 			}
 			return false
 		}
-		//3轮够级牌后开始问下家要不要
-		if room.getThreeAskBelowUser() && u.getLevelRoundCount() > 3 {
-			users := room.getUsers()
-			symmetryUser := u.getSymmetryUser()
-			noPassUsers := getBetweenNopassUsers(users, u, symmetryUser)
-			if len(noPassUsers) > 0 {
-				room.setController(noPassUsers, SetController_LetBurn)
-				return
-			} else {
-				if symmetryHandle() {
-					return
-				}
-			}
+		//检测下手的两个人是否可以 “烧牌(有头)” or “压牌(没头)” or "压牌(有头,牌面玩家已打出3套够级牌)"
+		if u.checkBelow() {
+			return
 		} else {
-			//检测下手的两个人是否可以 “烧牌(有头)” or “压牌(没头)” or "压牌(有头,牌面玩家已打出3套够级牌)"
-			if u.checkBelow() {
+			if symmetryHandle() {
 				return
-			} else {
-				if symmetryHandle() {
-					return
-				}
 			}
 		}
 	} else { //不是够级

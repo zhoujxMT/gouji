@@ -10,6 +10,12 @@ import (
 
 func (this *User) push(funcName string, content *string) {
 	go func() {
+		defer func() {
+			if p := recover(); p != nil {
+				errInfo := fmt.Sprintf("push : { %v }", p)
+				logger.Errorf(errInfo)
+			}
+		}()
 		time.Sleep(time.Millisecond)
 		conn := this.getConn()
 		xServer := frame.GetRpcxServer()

@@ -61,14 +61,6 @@ func (u *userManage) GetUserFromKeepAliveUsers(userid *string) *User {
 	return u.keepAliveUsers[*userid]
 }
 
-func (u *userManage) GetJudgmentUser() *User {
-	return u.judgmentUser
-}
-
-func (u *userManage) setJudgmentUser(user *User) {
-	u.judgmentUser = user
-}
-
 //获取比赛中的玩家数量
 func (u *userManage) GetUserCount() int {
 	u.lock.Lock()
@@ -108,6 +100,7 @@ func (u *userManage) AddUser(uid *string, userid *string, conn net.Conn) *User {
 		user.ranking = -1
 		user.jinLaTributeCards = []Card{}
 		user.dm = NewDelayMessage()
+		user.dm.SetUserID(*userid)
 		user.dm.Start()
 		user.online = true
 		user.levelRound = map[int]bool{}

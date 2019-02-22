@@ -24,8 +24,8 @@ func NewPool(redisDSN *RedisDSN) *RDS {
 	addr := redisDSN.Addr
 	password := redisDSN.PassWord
 	redisPool := &redis.Pool{
-		MaxIdle:     3,
-		MaxActive:   5,
+		MaxIdle:     200,
+		MaxActive:   1024,
 		IdleTimeout: 240 * time.Second,
 		Dial: func() (redis.Conn, error) {
 			c, err := redis.Dial("tcp", addr)

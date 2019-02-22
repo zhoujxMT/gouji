@@ -1,10 +1,12 @@
 package frame
 
 import (
+	"context"
 	"strings"
 
 	"github.com/smallnest/rpcx/client"
 	"github.com/smallnest/rpcx/protocol"
+	"kelei.com/utils/logger"
 )
 
 type RpcxClient struct {
@@ -32,13 +34,23 @@ func NewRpcxClient(rpcx *RpcxClient) client.XClient {
 	if rpcx.TransferType == BIDIRECTIONAL { //双向的
 		ch := make(chan *protocol.Message)
 		rpcxClient = client.NewBidirectionalXClient(rpcx.Module, client.Failtry, client.RandomSelect, d, client.DefaultOption, ch)
+		rpcxClient.SetSelector(&alwaysFirstSelector{})
 		go func() {
+			defer func() {
+				if p := recover(); p != nil {
+					logger.Errorf("[recovery] HandleGamePush : %v", p)
+				}
+			}()
 			//处理游戏服的推送
 			HandleGamePush := func(userid, funcName, content string) {
 				cl := GetClientManager().GetClient(userid)
 				if cl != nil {
 					msg := cl.Format(funcName, content)
-					cl.Log_Push(msg)
+					if funcName == "MatchEnd" {
+						cl.setCurrentRoomID("-1")
+					} else {
+						cl.Log_Push(msg)
+					}
 				}
 			}
 			for msg := range ch {
@@ -50,10 +62,34 @@ func NewRpcxClient(rpcx *RpcxClient) client.XClient {
 		}()
 	} else { //单向的
 		if rpcx.DiscoveryType == Discovery_MultipleServers {
-			rpcxClient = client.NewXClient(rpcx.Module, client.Failover, client.RoundRobin, d, client.DefaultOption)
+			rpcxClient = client.NewXClient(rpcx.Module, client.Failtry, client.RoundRobin, d, client.DefaultOption)
 		} else {
 			rpcxClient = client.NewXClient(rpcx.Module, client.Failtry, client.RandomSelect, d, client.DefaultOption)
 		}
 	}
+	d.Close()
 	return rpcxClient
+}
+
+type alwaysFirstSelector struct {
+	servers []string
+}
+
+func (s *alwaysFirstSelector) Select(ctx context.Context, servicePath, serviceMethod string, args interface{}) string {
+	var ss = s.servers
+	if len(ss) == 0 {
+		return ""
+	}
+	return ss[0]
+}
+
+func (s *alwaysFirstSelector) UpdateServer(servers map[string]string) {
+	var ss = make([]string, 0, len(servers))
+	for k := range servers {
+		ss = append(ss, k)
+	}
+	//	sort.Slice(ss, func(i, j int) bool {
+	//		return strings.Compare(ss[i], ss[j]) <= 0
+	//	})
+	s.servers = ss
 }

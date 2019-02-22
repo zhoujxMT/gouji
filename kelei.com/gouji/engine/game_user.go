@@ -17,32 +17,6 @@ import (
 )
 
 /*
-创建玩家,如果玩家不存在就创建
-in:
-out:userid
-*/
-func CreateUser(args []string) *string {
-	res := Res_Unknown
-	uid := args[0]
-	username := args[1]
-
-	userid := -1
-	db.QueryRow("select userinfo.userid from userinfo where userinfo.uid=?", uid).Scan(&userid)
-	if userid == -1 {
-		_, err := db.Exec("insert into userinfo(uid,username) values(?,?)", uid, username)
-		logger.CheckFatal(err, "CreateUser2")
-		err = db.QueryRow("select userid from userinfo where uid=?", uid).Scan(&userid)
-		logger.CheckFatal(err, "CreateUser3")
-		_, err = db.Exec("call UserInit(?)", userid)
-		logger.CheckFatal(err, "CreateUser4")
-	} else {
-		db.Exec("update userinfo set userinfo.username=? where uid=?", username, uid)
-	}
-	res = strconv.Itoa(userid)
-	return &res
-}
-
-/*
 获取玩家信息
 in:userid
 out:-2获取信息失败
@@ -98,6 +72,9 @@ func FleeCost(args []string) *string {
 		return &res
 	}
 	room := user.getRoom()
+	if room == nil {
+		return &res
+	}
 	if room.GetRoomStatus() == RoomStatus_Setout {
 		return &res
 	}

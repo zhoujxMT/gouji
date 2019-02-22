@@ -60,6 +60,50 @@ func (r *Room) GetBalanceData(balanceType int, args ...interface{}) (interface{}
 
 /*
 =========================================================================================================
+表-BalanceDataAudition
+=========================================================================================================
+*/
+
+func (r *Room) getBalanceDataAuditionKey(balanceType int) string {
+	return fmt.Sprintf("audition:roomT:%d:blceT:%d", r.GetRoomType(), balanceType)
+}
+
+//加载表balancedata数据
+func (r *Room) loadBalanceDataAudition() {
+	gameRds := getGameRds()
+	defer gameRds.Close()
+	exists, err := redis.Int(gameRds.Do("exists", r.getBalanceDataAuditionKey(Ranking_One)))
+	logger.CheckFatal(err, "loadBalanceDataAudition")
+	//不存在就从数据库中取
+	if exists == 0 {
+		roomType, balanceType, ingot, integral := 0, 0, 0, 0
+		rows, err := db.Query("select RoomType,BalanceType,ingot,integral from BalanceDataAudition where roomtype=?", r.GetRoomType())
+		logger.CheckFatal(err, "loadBalanceDataAudition2")
+		defer rows.Close()
+		buff := bytes.Buffer{}
+		for rows.Next() {
+			rows.Scan(&roomType, &balanceType, &ingot, &integral)
+			buff.WriteString(fmt.Sprintf("%d,%d,%d,%d", roomType, balanceType, ingot, integral))
+			buff.WriteString("|")
+		}
+		str := buff.String()
+		str = str[:len(str)-1]
+		_, err2 := gameRds.Do("evalsha", luaScript, 1, "auditionbalancedata", str)
+		logger.CheckFatal(err2)
+	}
+}
+
+//获取表数据
+func (r *Room) GetBalanceDataAudition(balanceType int, args ...interface{}) (interface{}, error) {
+	r.loadBalanceDataAudition()
+	args = append(args[:0], append([]interface{}{r.getBalanceDataAuditionKey(balanceType)}, args[0:]...)...)
+	gameRds := getGameRds()
+	defer gameRds.Close()
+	return gameRds.Do("hmget", args...)
+}
+
+/*
+=========================================================================================================
 表-RoomData
 =========================================================================================================
 */
@@ -118,6 +162,44 @@ func (r *Room) loadRoomData() {
 
 //获取表数据
 func (r *Room) GetRoomData(args ...interface{}) (interface{}, error) {
+	r.loadRoomData()
+	args = append(args[:0], append([]interface{}{r.getRoomDataKey()}, args[0:]...)...)
+	gameRds := getGameRds()
+	defer gameRds.Close()
+	return gameRds.Do("hmget", args...)
+}
+
+/*
+=========================================================================================================
+表-RoomDataAudition
+=========================================================================================================
+*/
+
+func (r *Room) getRoomDataAuditionKey() string {
+	return fmt.Sprintf("roomdataaudition:roomT:%d", r.GetRoomType())
+}
+
+//加载表RoomDataAudition数据
+func (r *Room) loadRoomDataAudition() {
+	key := r.getRoomDataKey()
+	gameRds := getGameRds()
+	defer gameRds.Close()
+	exists, err := redis.Int(gameRds.Do("exists", key))
+	logger.CheckFatal(err, "loadRoomDataAudition")
+	//不存在就从数据库中取
+	if exists == 0 {
+		playIngot, enterIngot, level, multiple, matchingIngot, winExp, loseExp, expendIngot, integral, charm, fleeIngot, fleeIntegral := 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+		row := db.QueryRow("select PlayIngot,EnterIngot,level,multiple,MatchingIngot,WinExp,LoseExp,ExpendIngot,Integral,Charm,fleeIngot, fleeIntegral from RoomDataAudition where roomtype=?", r.GetRoomType())
+		err = row.Scan(&playIngot, &enterIngot, &level, &multiple, &matchingIngot, &winExp, &loseExp, &expendIngot, &integral, &charm, &fleeIngot, &fleeIntegral)
+		logger.CheckFatal(err, "loadRoomDataAudition2")
+		_, err = gameRds.Do("hmset", key, "playIngot", playIngot, "enterIngot", enterIngot, "level", level, "multiple", multiple, "matchingIngot", matchingIngot, "winExp", winExp, "loseExp", loseExp, "expendIngot", expendIngot, "integral", integral, "charm", charm, "fleeIngot", fleeIngot, "fleeIntegral", fleeIntegral)
+		logger.CheckFatal(err, "loadRoomDataAudition3")
+		gameRds.Do("expire", key, expireSecond)
+	}
+}
+
+//获取表数据
+func (r *Room) GetRoomDataAudition(args ...interface{}) (interface{}, error) {
 	r.loadRoomData()
 	args = append(args[:0], append([]interface{}{r.getRoomDataKey()}, args[0:]...)...)
 	gameRds := getGameRds()

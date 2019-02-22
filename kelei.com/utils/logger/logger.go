@@ -195,6 +195,11 @@ func createLogFile() bool {
 	filename = strings.Replace(logFile.fileName, ".log", filename+".log", 1)
 	if err := os.Rename(logFile.fileName, filename); err == nil {
 		go func() {
+			defer func() {
+				if p := recover(); p != nil {
+					Errorf("[recovery] createLogFile : %v", p)
+				}
+			}()
 			//压缩文件
 			if bCompress {
 				tarCmd := exec.Command("tar", "-zcf", filename+".tar.gz", filename, "--remove-files")

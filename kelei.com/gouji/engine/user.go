@@ -36,7 +36,7 @@ const (
 	UserStatus_BurnFail                   //烧牌失败
 	UserStatus_Pass                       //过牌
 	UserStatus_Go                         //走科
-	UserStatus_Burn_Press                 //烧牌出牌
+	UserStatus_Burn_Press                 //烧牌压牌
 	UserStatus_Gouji                      //够级
 	UserStatus_NoSitDown                  //未落座
 	UserStatus_WaitRevolution             //等待自己革命
@@ -78,11 +78,12 @@ var basePoint []int = []int{4, 2, 0, 0, -2, -4, 4}
 type User struct {
 	uid                *string       //平台userid
 	userid             *string       //游戏userid
-	conn               net.Conn      //
+	conn               net.Conn      //链接
 	GateRpc            string        //网关地址
 	sessionKey         string        //sessionkey
 	token              string        //access_token
 	secret             string        //secret
+	headUrl            string        //头像地址
 	room               *Room         //房间ID
 	status             int           //玩家状态
 	cards              []Card        //牌列表
@@ -153,13 +154,13 @@ func (u *User) getHandlePerm() bool {
 func (u *User) currCtlIsSelf() bool {
 	room := u.getRoom()
 	//房间当前牌权的玩家
-	if *room.getControllerUser().getUserID() == *u.getUserID() {
+	if room.getControllerUser() == u {
 		return true
 	}
 	//等待获取牌权的玩家(烧牌)
 	waitUsers := room.getWaitControllerUsers()
 	for _, user := range waitUsers {
-		if *user.getUserID() == *u.getUserID() {
+		if user == u {
 			return true
 		}
 	}
@@ -269,8 +270,10 @@ func (u *User) checkGo() {
 	if len(userCards) <= 0 {
 		room := u.getRoom()
 		room.setRanking(u, 1)
-		//设置所有人都是没过牌状态
-		room.setAllUserNoPass()
+		if room.isChaos() {
+			//设置所有人都是没过牌状态
+			room.setAllUserNoPass()
+		}
 	}
 }
 
@@ -336,6 +339,14 @@ func (u *User) GetSecret() string {
 
 func (u *User) SetSecret(secret string) {
 	u.secret = secret
+}
+
+func (u *User) GetHeadUrl() string {
+	return u.headUrl
+}
+
+func (u *User) SetHeadUrl(headUrl string) {
+	u.headUrl = headUrl
 }
 
 func (u *User) getItemEffect() string {
@@ -559,6 +570,7 @@ func (u *User) setFirstSetAfterBurn(firstSetAfterBurn bool) {
 	u.firstSetAfterBurn = firstSetAfterBurn
 }
 
+//获取托管状态
 func (u *User) getTrusteeship() bool {
 	return u.trusteeship
 }
@@ -598,10 +610,6 @@ func (u *User) pushEndGame() {
 	u.pushMatchInfo()
 	//玩家回来,设置为在线
 	u.setOnline(true)
-	//裁判端
-	if room.getGameRule() == GameRule_Record {
-		room.pushJudgment("Online_Push", fmt.Sprintf("%s|%d", *u.getUserID(), 1))
-	}
 }
 
 //推送比赛的信息
@@ -634,6 +642,15 @@ func (u *User) pushMatchInfo() {
 	u.pushSurplusCardCount()
 	//推送暂停状态
 	u.pushPauseStatus()
+	//革命推送
+	if u.getStatus() == UserStatus_WaitRevolution {
+		message := fmt.Sprintf(",%s,%d,%d", *u.getUserID(), UserStatus_WaitRevolution, 10)
+		u.setController(message)
+	}
+	//裁判端
+	if room.getGameRule() == GameRule_Record {
+		room.pushJudgment("Online_Push", fmt.Sprintf("%s|%d", *u.getUserID(), 1))
+	}
 }
 
 /*
@@ -661,6 +678,14 @@ func (u *User) pushPauseStatus() {
 	room := u.getRoom()
 	matchingStatus := strconv.Itoa(room.getMatchingStatus())
 	u.push("Pause_Push", &matchingStatus)
+}
+
+/*
+推送等待革命状态
+*/
+func (u *User) pushWaitRevolutionStatus() {
+	res := "1"
+	u.push("Begin_Push", &res)
 }
 
 /*
@@ -763,13 +788,13 @@ func (u *User) pushCyclePlayCardInfo() {
 	users_cards := room.users_cards
 	for userid, cardids := range users_cards {
 		message := fmt.Sprintf("%s,%s,,,%d", userid, cardids, PlayType_EndGame)
+		time.Sleep(time.Millisecond * 5)
 		u.push("Play", &message)
 	}
 }
 
 //暂停倒计时
 func (u *User) pause() {
-	logger.Debugf("*******:%s", *u.getUserID())
 	u.dm.PauseTask()
 }
 
@@ -842,7 +867,6 @@ func (u *User) timeEnd(waitTime int) {
 	room := u.getRoom()
 	current_cards := room.getCurrentCards()
 	args := []string{*u.getUserID()}
-	logger.Debugf("00000:%v", u.getTrusteeship())
 	//托管
 	if u.getTrusteeship() {
 		//压牌
@@ -863,7 +887,6 @@ func (u *User) timeEnd(waitTime int) {
 	} else {
 		//压牌
 		if len(current_cards) > 0 {
-			logger.Debugf("11111:%d", u.getStatus())
 			if u.getStatus() == UserStatus_WaitBurn { //等待烧牌,不烧
 				NoBurn(args)
 			} else if u.getStatus() == UserStatus_Burn_Press { //点击烧牌之后,没有出牌
@@ -871,9 +894,7 @@ func (u *User) timeEnd(waitTime int) {
 				if u.getRoom().getGameRule() == GameRule_Record {
 					u.BurnFail()
 				}
-				//				u.setTrusteeship(true)
 			} else {
-				logger.Debugf("22222:%s", *u.getUserID())
 				CheckCard(args)
 			}
 		} else {
@@ -951,7 +972,6 @@ func (u *User) TG_Push() {
 
 func (u *User) setController(message string) {
 	pushMessageToUsers("SetController_Push", []string{message}, []string{*u.getUserID()})
-	u.getRoom().pushJudgment("SetController_Push", message)
 }
 
 func (u *User) setControllerUsers(message string) {
@@ -967,6 +987,12 @@ func (u *User) setCtlUsers(userid string, userstatus string, setControllerStatus
 //给此玩家推送信息
 func (u *User) push(funcName string, message *string) {
 	go func() {
+		defer func() {
+			if p := recover(); p != nil {
+				errInfo := fmt.Sprintf("push : { %v }", p)
+				logger.Errorf(errInfo)
+			}
+		}()
 		time.Sleep(time.Millisecond)
 		conn := u.GetConn()
 		xServer := frame.GetRpcxServer()
@@ -1099,7 +1125,11 @@ func (u *User) exitRoomHandle() {
 		room.resetHYTW()
 	}
 	//房间的状态信息推送
-	room.matchingPush(nil)
+	if room.GetMatchID() == Match_HXS {
+		room.matchingHXSPush(nil)
+	} else {
+		room.matchingPush(nil)
+	}
 }
 
 //退出正在比赛的房间
@@ -1107,6 +1137,9 @@ func (u *User) exitMatchRoom() {
 	room := u.getRoom()
 	//不能删！！！
 	if room == nil {
+		return
+	}
+	if room.getGameRule() == GameRule_Record {
 		return
 	}
 	//增加逃跑次数
@@ -1238,7 +1271,7 @@ func (u *User) LookCard(lookeduser *User) *string {
 func (u *User) MatchUseItem(dstuserid string, itemid int) *string {
 	user := UserManage.GetUser(&dstuserid)
 	if user == nil {
-		return &Res_NoBack
+		return &Res_Unknown
 	}
 	res := u.useItemByItemID(itemid, 1, user.getRealityUserID())
 	res = fmt.Sprintf("%s,%d", strings.Split(res, ",")[0], itemid)

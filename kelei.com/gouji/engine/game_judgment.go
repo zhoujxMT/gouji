@@ -9,6 +9,12 @@ import (
 	. "kelei.com/utils/common"
 )
 
+const (
+	DEAL_NORMAL = iota //默认没有好坏牌
+	DEAL_RED           //红方牌好
+	DEAL_BLUE          //蓝方牌好
+)
+
 /*
 获取房间列表
 */
@@ -29,6 +35,8 @@ in:roomid
 out:1
 push:房间状态、所有人剩余牌、当前轮的出牌信息、当前出牌状态、所有人剩余牌数量
 */
+var lastTime = time.Now()
+
 func MatchingJudgment(args []string) *string {
 	userid := args[0]
 	roomid := args[1]
@@ -36,13 +44,25 @@ func MatchingJudgment(args []string) *string {
 	if room == nil {
 		return &Res_Unknown
 	}
+	if time.Now().Sub(lastTime) < time.Second {
+		return &Res_Succeed
+	}
+	lastTime = time.Now()
 	user := UserManage.GetUser(&userid)
 	user.setUserType(TYPE_JUDGMENT)
 	user.setRoom(room)
-	UserManage.setJudgmentUser(user)
 	room.setJudgmentUser(user)
 	room.matchingPush(nil)
 	if room.isMatching() {
+		//推送房间的走科信息
+		time.Sleep(time.Millisecond * 10)
+		//推送房间的革命信息
+		user.revolutionPush()
+		time.Sleep(time.Millisecond * 5)
+		//推送房间的走科信息
+		room.goPush(user)
+		time.Sleep(time.Millisecond * 5)
+		//推送所有人剩余的牌
 		pushAllUserSurplusCards(room)
 		time.Sleep(time.Millisecond * 10)
 		//推送当前轮的出牌信息
@@ -57,6 +77,10 @@ func MatchingJudgment(args []string) *string {
 		user.pushSurplusCardCount()
 		//暂停状态
 		user.pushPauseStatus()
+		//所有选手端是否在线
+		room.AllUsersOnlinePush()
+	} else if room.GetRoomStatus() == RoomStatus_Revolution {
+		user.pushWaitRevolutionStatus()
 	}
 	return &Res_Succeed
 }
@@ -90,11 +114,19 @@ out:1
 */
 func Deal(args []string) *string {
 	roomid := args[1]
+	mode := DEAL_NORMAL
+	if len(args) > 1 {
+		mode, _ = strconv.Atoi(args[2])
+	}
 	room := RoomManage.GetRoom(roomid)
 	if room == nil {
 		return &Res_Unknown
 	}
+	if !room.userEnough() {
+		return &Res_Unknown
+	}
 	room.reset()
+	room.setDealMode(mode)
 	room.deal()
 	return &Res_Succeed
 }
@@ -109,6 +141,9 @@ func Begin(args []string) *string {
 	roomid := args[1]
 	room := RoomManage.GetRoom(roomid)
 	if room == nil {
+		return &Res_Unknown
+	}
+	if !room.userEnough() {
 		return &Res_Unknown
 	}
 	go room.begin()

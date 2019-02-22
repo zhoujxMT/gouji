@@ -6,6 +6,7 @@ import (
 
 	eng "kelei.com/gouji/engine"
 	"kelei.com/utils/common"
+	"kelei.com/utils/delaymsg"
 	"kelei.com/utils/frame/command"
 	"kelei.com/utils/frame/config"
 	"kelei.com/utils/logger"
@@ -29,10 +30,22 @@ func GetCmds() map[string]func(string) {
 	commands["cardcount"] = cardcount
 	commands["geming"] = geming
 	commands["tuoguan"] = tuoguan
+	commands["loguserid"] = loguserid
+	commands["exit"] = func(cmdVal string) {
+		logger.Fatalf("exit")
+	}
 	//end
 	commands["mode"] = config.Mode
 	command.CreateHelp(commands)
 	return commands
+}
+
+func loguserid(cmdVal string) {
+	if cmdVal == "" {
+		logger.Infof("loguserid : %s", delaymsg.GetLogUserID())
+	} else {
+		delaymsg.SetLogUserID(cmdVal)
+	}
 }
 
 func usercount(cmdVal string) {

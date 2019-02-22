@@ -55,25 +55,53 @@ func (r *Room) matchingOverHandle() {
 	r.showSurplusCards()
 	//推送比赛结束的信息给所有玩家
 	r.pushMatchingEndInfo()
-	//设置房间为准备中的状态
-	r.SetRoomStatus(RoomStatus_Setout)
-	//重置所有的玩家
-	r.resetUsers()
-	//删除离线和逃跑的玩家
-	r.removeUsers()
-	//推送房间的状态,所有人变成了未准备的状态
-	r.matchingPush(nil)
-	//开启准备倒计时
-	r.setOutCountDown()
+	//修改网关的比赛状态
+	r.updateGateMatchStatus()
+	if r.GetMatchID() == Match_HXS {
+		//将所有人踢出房间
+		r.removeAllUsers()
+	} else {
+		//设置房间为准备中的状态
+		r.SetRoomStatus(RoomStatus_Setout)
+		//重置所有的玩家
+		r.resetUsers()
+		//删除离线和逃跑的玩家
+		r.removeUsers()
+		//推送房间的状态,所有人变成了未准备的状态
+		r.matchingPush(nil)
+		//开启准备倒计时
+		r.setOutCountDown()
+	}
 	//上报用户数据
 	r.reportedUserInfo()
+}
+
+//修改网关的比赛状态
+func (r *Room) updateGateMatchStatus() {
+	users := r.getUsers()
+	for _, user := range users {
+		if user != nil {
+			res := ""
+			user.push("MatchEnd", &res)
+		}
+	}
+}
+
+//将所有人踢出房间
+func (r *Room) removeAllUsers() {
+	users := r.getUsers()
+	for _, user := range users {
+		if user != nil {
+			user.exitRoom()
+		}
+	}
 }
 
 //上报用户数据
 func (r *Room) reportedUserInfo() {
 	users := r.getUsers()
 	for _, user := range users {
-		if !user.getIsAI() {
+		if user != nil && !user.getIsAI() {
 			user.uploadWX()
 		}
 	}
@@ -90,10 +118,12 @@ func (r *Room) closeUserCountDown() {
 func (r *Room) removeUsers() {
 	users := r.getUsers()
 	for _, user := range users {
-		//玩家不在线
-		if !user.getOnline() || user.getIsAI() {
-			//退出房间
-			ExitMatch([]string{*user.getUserID()})
+		if user != nil {
+			//玩家不在线
+			if !user.getOnline() || user.getIsAI() {
+				//退出房间
+				ExitMatch([]string{*user.getUserID()})
+			}
 		}
 	}
 }
@@ -168,7 +198,7 @@ func (r *Room) showSurplusCards() {
 	time.Sleep(time.Millisecond * 10)
 	time.Sleep(time.Second * 1)
 	pushMessageToUsers("ShowSurplusCards_Push", []string{message}, r.getUserIDs())
-	time.Sleep(time.Second * 2)
+	time.Sleep(time.Millisecond * 1500)
 }
 
 //获取红蓝队头二科的数量
@@ -237,10 +267,11 @@ var IntegralData_HYTW = []int{40, 20, 0, 0, -20, -40, 40}
 获取团队结算数据
 out:团队胜利元宝数,团队失败元宝数,玩家对应的积分数
 */
-func (r *Room) getTeamBalanceInfo() (int, int, int, int) {
+func (r *Room) getTeamBalanceInfo() (int, int, int, int, int, int) {
 	users := r.getRanking()
 	winIngot, loseIngot := 0, 0
 	winIntegral, loseIntegral := 0, 0
+	winX, loseX := 0, 0
 	threeFamily := r.threeFamily()
 	for ranking, user := range users {
 		if user == nil {
@@ -254,42 +285,52 @@ func (r *Room) getTeamBalanceInfo() (int, int, int, int) {
 				x = -1
 			}
 		}
-		ingot, integral := 0, 0
+		ingot, integral, ticker := 0, 0, 0
 		if r.GetMatchID() == Match_GJYX {
 			balanceData, err := redis.Ints(r.GetBalanceData(ranking, "ingot", "integral"))
 			logger.CheckError(err)
 			ingot, integral = balanceData[0], balanceData[1]
 		} else if r.GetMatchID() == Match_HYTW {
 			ingot, integral = 0, IntegralData_HYTW[ranking]
+		} else if r.GetMatchID() == Match_HXS {
+			balanceData, err := redis.Ints(r.GetBalanceDataAudition(ranking, "ingot", "integral"))
+			logger.CheckError(err)
+			ingot, integral = balanceData[0], balanceData[1]
+			ticker = basePoint[ranking]
 		}
 		ingot = ingot * x
 		integral = integral * x
+		ticker = ticker * x
 		if matchResult == MatchResult_Win {
 			winIngot += ingot
 			winIntegral += integral
+			winX += ticker
 		} else if matchResult == MatchResult_Lose {
 			loseIngot += ingot
 			loseIntegral += integral
+			loseX += ticker
 		}
 	}
-	return winIngot, loseIngot, winIntegral, loseIntegral
+	return winIngot, loseIngot, winIntegral, loseIntegral, winX, loseX
 }
 
 //获取所有玩家结算数据
 func (r *Room) getUserBalanceInfo() (*string, map[string][]int) {
-	winIngot, loseIngot, winIntegral, loseIntegral := r.getTeamBalanceInfo()
+	winIngot, loseIngot, winIntegral, loseIntegral, winX, loseX := r.getTeamBalanceInfo()
 	mapInfo := map[string][]int{}
 	buff := bytes.Buffer{}
 	users := r.getRanking()
 	for _, user := range users {
 		userid := *user.getUserID()
-		mapInfo[userid] = make([]int, 2)
+		mapInfo[userid] = make([]int, 3)
 		matchResult := user.getMatchResult()
 		//通用的积分
 		if matchResult == MatchResult_Win {
 			mapInfo[userid][0] = winIntegral
+			mapInfo[userid][2] = winX
 		} else if matchResult == MatchResult_Lose {
 			mapInfo[userid][0] = loseIntegral
+			mapInfo[userid][2] = loseX
 		}
 		if r.GetMatchID() == Match_GJYX {
 			ingot := 0
@@ -312,6 +353,7 @@ func (r *Room) getUserBalanceInfo() (*string, map[string][]int) {
 				itemEffect = user.getItemEffect()
 			}
 			mapInfo[userid][1] = userIngot
+			//userid$获得元宝$是否破产$道具buff$红蓝队$等级
 			buff.WriteString(fmt.Sprintf("%s$%d$%d$%s$%d$%d|", userid, ingot, bankrupt, itemEffect, user.getTeamMark(), level))
 		} else if r.GetMatchID() == Match_HYTW {
 			integral := mapInfo[userid][0]
@@ -320,7 +362,33 @@ func (r *Room) getUserBalanceInfo() (*string, map[string][]int) {
 			if !user.getIsAI() {
 				level = user.getLevel()
 			}
+			//userid$积分$胜平负$红蓝队$等级
 			buff.WriteString(fmt.Sprintf("%s$%d$%d$%d$%d|", userid, integral, matchResult, user.getTeamMark(), level))
+		} else if r.GetMatchID() == Match_HXS {
+			ingot, ticker := 0, 0
+			if matchResult == MatchResult_Win {
+				ingot = winIngot
+				ticker = winX
+			} else if matchResult == MatchResult_Lose {
+				ingot = loseIngot
+				ticker = 0
+			}
+			//元宝,等级,是否破产
+			userIngot, level, bankrupt := 0, 1, 0
+			itemEffect := Res_NoData
+			//不是AI
+			if !user.getIsAI() {
+				ingot = user.effect_Ingot(ingot)
+				userIngot = user.updateIngot(ingot, 4)
+				if userIngot <= 0 {
+					bankrupt = 1
+				}
+				level = user.getLevel()
+				itemEffect = user.getItemEffect()
+			}
+			mapInfo[userid][1] = userIngot
+			//userid$获得元宝$是否破产$道具buff$红蓝队$等级$晋级券
+			buff.WriteString(fmt.Sprintf("%s$%d$%d$%s$%d$%d$%d|", userid, ingot, bankrupt, itemEffect, user.getTeamMark(), level, ticker))
 		}
 	}
 	usersInfo := buff.String()
@@ -371,11 +439,16 @@ func (r *Room) pushMatchingEndInfo_GJYX() {
 		}
 		//获取玩家元宝
 		userIngot := mapInfo[userid][1]
-		//等级|积分|经验|当前级别经验|当前级别升级经验|房费|比赛结果(2圈三户1胜0平-1负-2被圈三户)|是否升级|金币|升级金币奖励|房间底分,userid$获得元宝$是否破产|
+		//等级|积分|经验|当前级别经验|当前级别升级经验|房费|比赛结果(2圈三户1胜0平-1负-2被圈三户)|是否升级|元宝|升级元宝奖励|房间底分,userid$获得元宝$是否破产$道具buff$红蓝队$等级|
 		messages[i] = fmt.Sprintf("%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d,%s", level, userIntegral, getExp, lvlExp, upExp, expendIngot, matchResult, isUpgrade, userIngot, upIngotAward, r.getMultiple(), *usersInfo)
 	}
 	pushMessageToUsers("MatchingEnd_Push", messages, userids)
-	r.pushJudgment("MatchingEnd_Push", "1")
+	//status=1正常结束  status=2圈三户
+	status := "1"
+	if r.threeFamily() {
+		status = "2"
+	}
+	r.pushJudgment("MatchingEnd_Push", status)
 }
 
 //推送比赛结束的信息-好友同玩
@@ -418,7 +491,7 @@ func (r *Room) pushMatchingEndInfo_HYTW() {
 				matchResult = 2
 			}
 		}
-		//等级|积分|第几局|是否是最后一局|红队积分|蓝队积分|比赛结果(2圈三户1胜0平-1负-2被圈三户),userid$获得积分$是否胜利|
+		//等级|积分|第几局|是否是最后一局|红队积分|蓝队积分|比赛结果(2圈三户1胜0平-1负-2被圈三户),userid$积分$胜平负$红蓝队$等级|
 		messages[i] = fmt.Sprintf("%d|%d|%d|%d|%d|%d|%d,%s", level, integral, inning, islast, r.redIntegral, r.blueIntegral, matchResult, *usersInfo)
 	}
 	if islast == 1 {
@@ -443,6 +516,81 @@ func (r *Room) resetHYTW() {
 	}
 }
 
+//推送比赛结束的信息-海选赛
+func (r *Room) pushMatchingEndInfo_HXS() {
+	usersInfo, mapInfo := r.getUserBalanceInfo()
+	roomData, err := redis.Ints(r.GetRoomData("winExp", "loseExp", "expendIngot"))
+	logger.CheckFatal(err, "pushMatchingEndInfo:1")
+	winExp, loseExp, expendIngot := roomData[0], roomData[1], roomData[2]
+	messages := make([]string, pcount)
+	userids := r.getUserIDs()
+	tickerCount, win := 0, 0
+	for i, userid := range userids {
+		user := UserManage.GetUser(&userid)
+		//获取玩家经验、胜平负
+		getExp, matchResult := 0, user.getMatchResult()
+		if matchResult == MatchResult_Win {
+			getExp = winExp
+		} else if matchResult == MatchResult_Flat {
+			getExp = loseExp
+		} else if matchResult == MatchResult_Lose {
+			getExp = loseExp
+		}
+		isUpgrade, level, lvlExp, upExp, upIngotAward := 0, 0, 0, 0, 0
+		userIntegral := 0
+		if !user.getIsAI() {
+			//经验的道具效果
+			getExp = user.effect_Exp(getExp)
+			//更新玩家经验
+			isUpgrade, level, lvlExp, upExp, upIngotAward = user.updateExp(getExp)
+			//更新玩家积分
+			userIntegral = mapInfo[userid][0]
+			//积分的道具效果
+			userIntegral = user.effect_Integral(userIntegral)
+			//比赛结束更新玩家信息
+			user.endUpdateUserInfo(map[string]int{"integral": userIntegral, "matchResult": matchResult})
+			//海选赛信息更新
+			ticker := mapInfo[userid][2]
+			if user.getMatchResult() == MatchResult_Win {
+				tickerCount, win = ticker, 1
+			} else {
+				tickerCount, win = 0, 0
+			}
+			user.auditionEndUpdateUserInfo(win, tickerCount)
+		}
+		//三户
+		if r.threeFamily() {
+			if user.getRanking() >= Ranking_Four {
+				matchResult = -2
+			} else {
+				matchResult = 2
+			}
+		}
+		//获取玩家元宝
+		userIngot := mapInfo[userid][1]
+		//获取玩家剩余海选赛次数
+		ranking, tickerCount, surplusCount, status, auditionMatchTimeStatus := 0, 0, 0, 0, 0
+		//赛事是否结束
+		matchEnd := 0
+		if auditionMatchTimeStatus == -1 {
+			matchEnd = 1
+		}
+		db.QueryRow("call GetAuditionMyRanking(?)", userid).Scan(&ranking, &tickerCount, &surplusCount, &status, &auditionMatchTimeStatus)
+		/*
+			push:等级|积分|经验|当前级别经验|当前级别升级经验|房费|比赛结果(2圈三户1胜0平-1负-2被圈三户)|是否升级|元宝|升级元宝奖励|房间底分|赛事是否结束(0未结束1已结束)|剩余挑战次数,userid$获得元宝$是否破产$道具buff$红蓝队$等级$晋级券|
+			des:”赛事是否结束“字段为1时，前端就别显示获得多少晋级券了，直接显示赛事结束。
+		*/
+		messages[i] = fmt.Sprintf("%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d,%s", level, userIntegral, getExp, lvlExp, upExp, expendIngot, matchResult, isUpgrade, userIngot, upIngotAward, r.getMultiple(), matchEnd, surplusCount, *usersInfo)
+	}
+	pushMessageToUsers("MatchingEnd_Push", messages, userids)
+	//status=1正常结束  status=2圈三户
+	status := "1"
+	if r.threeFamily() {
+		status = "2"
+	}
+	r.pushJudgment("MatchingEnd_Push", status)
+}
+
 /*
 MatchingEnd_Push(推送比赛结束的信息)
 out:
@@ -454,5 +602,7 @@ func (r *Room) pushMatchingEndInfo() {
 		r.pushMatchingEndInfo_GJYX()
 	} else if r.GetMatchID() == Match_HYTW {
 		r.pushMatchingEndInfo_HYTW()
+	} else if r.GetMatchID() == Match_HXS {
+		r.pushMatchingEndInfo_HXS()
 	}
 }

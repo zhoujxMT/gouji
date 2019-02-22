@@ -68,11 +68,14 @@ func (r *Room) setController(users interface{}, status int) {
 			//压牌的情况,需要判断可不可以让牌
 			if user.canLetCard() {
 				status = SetController_Let
-			} else if user.getStatus() == UserStatus_WaitKou { //玩家是等待扣牌的状态
-				if user.canExcel() {
-					status = SetController_Kou
-				} else {
-					status = SetController_Kou_ForceCheck
+			} else {
+				if !r.isChaos() && user == r.getCurrentCardsUser().getSymmetryUser() {
+					user.setStatus(UserStatus_WaitKou)
+					if user.canExcel() {
+						status = SetController_Kou
+					} else {
+						status = SetController_Kou_ForceCheck
+					}
 				}
 			}
 		}
@@ -106,6 +109,7 @@ func (r *Room) setController(users interface{}, status int) {
 					}
 				}
 			} else {
+				r.setControllerUser(user)
 				userstatuss = append(userstatuss, SetController_Press)
 			}
 		}
@@ -140,7 +144,6 @@ func (r *Room) setController(users interface{}, status int) {
 		message := fmt.Sprintf("%s,%s,%d,%d", userHandle, userid, userstatus, waitTime)
 		messages = append(messages, message)
 	}
-	logger.Debugf("aaaaa:%v,%d,%d", userids, status, waitTime)
 	//给玩家添加操作倒计时
 	for _, userid := range userids {
 		if status != SetController_NoChange {
@@ -163,7 +166,7 @@ func (r *Room) currentCardsUserNewCycle() {
 			//新一轮
 			r.newCycle()
 			r.setControllerUser(nil)
-			r.setController(user, SetController_Burn_Press)
+			r.setController(user, SetController_Burn_New)
 		} else {
 			r.setControllerUser(nil)
 			r.setController(user, SetController_NewCycle)
@@ -198,6 +201,7 @@ func (r *Room) getWaitTime(status int) int {
 func (r *Room) getUserHandle() string {
 	userHandle := ""
 	user := r.getControllerUser()
+	currentCardsUser := r.getCurrentCardsUser()
 	if user == nil {
 		return userHandle
 	}
@@ -212,7 +216,7 @@ func (r *Room) getUserHandle() string {
 			info = *user.getBurnUser().getUserID()
 		}
 		userHandle = fmt.Sprintf("%s|%d|%s", *user.getUserID(), status, info)
-	} else if status == UserStatus_NoPass || status == UserStatus_WaitKou { //压牌 || 等待扣牌
+	} else if status == UserStatus_NoPass || status == UserStatus_WaitBurn || status == UserStatus_Burn_Press || status == UserStatus_WaitKou { //压牌 || 等待扣牌
 		//更改让牌的玩家为过牌
 		letUser := r.updateLetToPass()
 		if letUser != nil {
@@ -220,7 +224,7 @@ func (r *Room) getUserHandle() string {
 		}
 		currentCards := r.getCurrentCards()
 		//提示够级
-		if user.isLevel(currentCards) {
+		if user.isLevel(currentCards) && user == currentCardsUser {
 			if userHandle != "" {
 				userHandle = userHandle + "-" + fmt.Sprintf("%s|%d|%s", *user.getUserID(), UserStatus_Gouji, "")
 			} else {
@@ -256,8 +260,8 @@ func (r *Room) getNextUser() *User {
 		u := users[index]
 		//不是出牌人,是活动的
 		if u.getUserID() != currentCardsUser.getUserID() && u.isActive() {
-			//没过牌
-			if u.getStatus() == UserStatus_NoPass {
+			//没过牌 || 烧牌压牌
+			if u.getStatus() == UserStatus_NoPass || u.getStatus() == UserStatus_Burn_Press {
 				user = u
 				break
 			} else if u.getStatus() == UserStatus_Let { //让牌
@@ -270,14 +274,6 @@ func (r *Room) getNextUser() *User {
 					if u.checkBelowIfPressCard() {
 						continue
 					}
-					user = u
-					break
-				} else if u.getStatus() == UserStatus_Pass && false { //过牌状态
-					//是当前控牌人
-					if u == controllerUser {
-						continue
-					}
-					u.setStatus(UserStatus_WaitKou)
 					user = u
 					break
 				}
@@ -327,7 +323,7 @@ func getBetweenNopassUsers(users []*User, user1 *User, user2 *User) []*User {
 	betweenUsers := getBetweenUsers(users, user1, user2)
 	nopassUsers := []*User{}
 	for _, user := range betweenUsers {
-		if user.getStatus() == UserStatus_NoPass {
+		if user.getStatus() == UserStatus_NoPass || user.getStatus() == UserStatus_Burn_Press {
 			nopassUsers = append(nopassUsers, user)
 		}
 	}
@@ -474,6 +470,7 @@ func (r *Room) newCycle() {
 	r.setCurrentCards([]Card{})
 	r.setCurrentCardsUser(nil)
 	r.setWaitControllerUsers(nil)
+	r.setBurnStatus(BurnStatus_Burn)
 	for _, user := range r.users {
 		if user.isActive() && user.getStatus() != UserStatus_Burn_Press {
 			user.setStatus(UserStatus_NoPass)
@@ -485,7 +482,7 @@ func (r *Room) newCycle() {
 		}
 		//革命后对家出了3套牌
 		if user.getLevelRoundCount() == 3 {
-			user.setLevelRound(4)
+			user.setLevelRound(1000)
 		}
 	}
 	//某一轮的出牌信息

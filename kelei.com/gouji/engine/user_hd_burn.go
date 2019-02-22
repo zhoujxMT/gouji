@@ -43,7 +43,9 @@ func (u *User) handleBurn() {
 	handleControllerUser := func(f func(), ctrUser *User) {
 		room.setControllerUser(u)
 		f()
-		room.setControllerUser(ctrUser)
+		if !room.getOrderController() {
+			room.setControllerUser(ctrUser)
+		}
 	}
 	//获取等待牌权的玩家
 	waitcusers := room.getWaitControllerUsers()
@@ -57,7 +59,7 @@ func (u *User) handleBurn() {
 				room.newCycle()
 				handleControllerUser(func() {
 					u.setStatus(UserStatus_Pass)
-					room.setController(currentCardsUser, SetController_Burn_Press)
+					room.setController(currentCardsUser, SetController_Burn_New)
 					u.setStatus(UserStatus_NoPass)
 				}, currentCardsUser)
 			} else {
@@ -69,17 +71,20 @@ func (u *User) handleBurn() {
 		//设置出牌人对家获得牌权
 		currentCardsSymmetryGetController := func() {
 			handleControllerUser(func() {
+				if currentCardsSymmetry.isActive() {
+					currentCardsSymmetry.setStatus(UserStatus_NoPass)
+				}
 				room.setController(currentCardsSymmetry, SetController_Press)
 			}, currentCardsSymmetry)
 		}
 		//处理牌权
 		handleController := func() {
 			//“出牌人”和“对家”之间的人过牌,牌权给出牌人的对家
-			if len(getBetweenUsers([]*User{u}, currentCardsUser, currentCardsSymmetry)) > 0 {
+			b := len(getBetweenUsers([]*User{u}, currentCardsUser, currentCardsSymmetry)) > 0
+			if b {
 				if currentCardsSymmetry.isRevolution() {
 					currentCardsSymmetry.noHeadHandleGouji()
 				} else {
-					currentCardsSymmetry.setStatus(UserStatus_NoPass)
 					currentCardsSymmetryGetController()
 				}
 			} else {
@@ -94,8 +99,18 @@ func (u *User) handleBurn() {
 		if isNormalBurn { //正常烧牌
 			handleController()
 		} else { //让牌烧牌
-			currentCardsSymmetry.setStatus(UserStatus_WaitKou)
-			currentCardsSymmetryGetController()
+			if u.checkBelow() {
+				return
+			}
+			if len(getBetweenUsers([]*User{u}, currentCardsUser, currentCardsSymmetry)) > 0 {
+				currentCardsSymmetryGetController()
+			} else {
+				if currentCardsSymmetry.isActive() {
+					currentCardsSymmetryGetController()
+				} else {
+					currentCardsUserGetController()
+				}
+			}
 		}
 		return
 	}
@@ -165,6 +180,8 @@ func (u *User) canBurn() bool {
 func (u *User) checkBelow() bool {
 	room := u.getRoom()
 	roomUsers := room.getUsers()
+	//牌权玩家
+	controllerUser := room.getControllerUser()
 	//牌面玩家
 	currentCardsUser := room.getCurrentCardsUser()
 	//牌面玩家的对家
@@ -196,6 +213,8 @@ func (u *User) checkBelow() bool {
 			if len(burnUsers) == 0 { //没有烧牌的人
 				//没过牌
 				if user.getStatus() == UserStatus_NoPass {
+					//提示过牌
+					room.setControllerUser(u)
 					//获得牌权
 					room.setController(user, SetController_Press)
 					return true
@@ -206,16 +225,19 @@ func (u *User) checkBelow() bool {
 			}
 		}
 		//(没过牌、让牌、烧牌压牌)的人
-		if user.getStatus() == UserStatus_NoPass || user.getStatus() == UserStatus_Let || user.getStatus() == UserStatus_Burn_Press {
+		if user.getStatus() == UserStatus_NoPass || user.getStatus() == UserStatus_Let || user.getStatus() == UserStatus_Burn_Press || user.getStatus() == UserStatus_WaitBurn {
 			//压牌(有头,牌面玩家已打出3套够级牌)
 			if room.getThreeAskBelowUser() && currentCardsUser.getLevelRoundCount() > 3 {
 				burnUsers = append(burnUsers, user)
 			} else {
-				if user.canBurn() {
+				if room.getBurnStatus() == BurnStatus_LetBurn || (room.getBurnStatus() == BurnStatus_Burn && user.canBurn()) {
 					burnUsers = append(burnUsers, user)
 				} else {
 					if len(getBetweenUsers([]*User{user}, u, symmetryUser)) > 0 {
 						user.setStatus(UserStatus_Pass)
+						room.setControllerUser(user)
+						room.setController(user, SetController_NoChange)
+						room.setControllerUser(controllerUser)
 					}
 				}
 			}
@@ -224,7 +246,7 @@ func (u *User) checkBelow() bool {
 	if len(burnUsers) <= 0 {
 		return false
 	}
-	if room.getThreeAskBelowUser() && currentCardsUser.getLevelRoundCount() > 3 {
+	if (room.getThreeAskBelowUser() && currentCardsUser.getLevelRoundCount() > 3) || room.getBurnStatus() == BurnStatus_LetBurn {
 		//设置房间的状态为让牌烧牌(能看见玩家接牌)
 		room.setBurnStatus(BurnStatus_LetBurn)
 		room.setController(burnUsers, SetController_LetBurn)
@@ -307,6 +329,9 @@ func getKingAndNoHangCount(cards []Card) (int, int) {
 	//不能挂的牌集合
 	noHangCards := make(map[int]bool)
 	for _, card := range cards {
+		if card.Priority == 0 {
+			break
+		}
 		if card.Priority > 13 { //王
 			kingCount = kingCount + 1
 		} else if card.Priority < 13 { //A 3-13

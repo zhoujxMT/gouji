@@ -44,8 +44,8 @@ func NewDB(sqlDSN *SqlDSN) *DB {
 
 func (d *DB) connect() {
 	db, err := sql.Open("mysql", d.SqlDSN.Remote())
-	db.SetMaxOpenConns(2000)
 	db.SetMaxIdleConns(100)
+	db.SetMaxOpenConns(1024)
 	logger.CheckFatal(err, "创建数据库失败")
 	logger.CheckFatal(db.Ping(), "连接数据库失败")
 	d.DB = db

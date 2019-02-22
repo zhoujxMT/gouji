@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
+	"github.com/garyburd/redigo/redis"
 	"github.com/gorilla/websocket"
 	"github.com/smallnest/rpcx/client"
 
@@ -24,7 +26,7 @@ const (
 )
 
 var (
-	clientManager = &ClientManager{make(map[string]*Client), make(map[string]*string)}
+	clientManager = &ClientManager{clients: make(map[string]*Client), clientsName: make(map[string]*string)}
 )
 
 func GetClientManager() *ClientManager {
@@ -65,6 +67,7 @@ func handleConn(conn *websocket.Conn) {
 type ClientManager struct {
 	clients     map[string]*Client
 	clientsName map[string]*string
+	lock        sync.Mutex
 }
 
 //服务开启完毕
@@ -101,21 +104,38 @@ func (c *ClientManager) AddClient(conn *websocket.Conn) {
 
 //保存客户端
 func (c *ClientManager) saveClient(client *Client) {
+	c.lock.Lock()
+	cl := c.clients[client.getUserID()]
+	c.lock.Unlock()
+	if cl != nil {
+		err := errors.New("建立新连接,关闭旧连接")
+		cl.close(err)
+		//只有裁判端才有用
+		client.Log_Push(client.Format("Pause_Push", "1"))
+	}
+	c.lock.Lock()
 	c.clients[client.getUserID()] = client
+	c.lock.Unlock()
 }
 
 //删除客户端
 func (c *ClientManager) removeClient(userid string) {
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	delete(c.clients, userid)
 }
 
 //获取客户端
 func (c *ClientManager) GetClient(userid string) *Client {
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	return c.clients[userid]
 }
 
 //获取客户端根据uid
 func (c *ClientManager) GetClientByUID(uid string) *Client {
+	c.lock.Lock()
+	defer c.lock.Unlock()
 	for _, cl := range c.clients {
 		if cl.getUID() == uid {
 			return cl
@@ -227,29 +247,37 @@ func (c *Client) setLastActionTime(t time.Time) {
 
 //关闭客户端
 func (c *Client) close(err error) {
+	c.conn.Close()
 	//从客户端列表中删除
 	clientManager.removeClient(c.getUserID())
 	//向游戏服务器发送连接关闭
 	c.handleClientData([]byte("ClientConnClose"))
 	//关闭rpcx连接
 	c.closeRpcxClient()
-	logger.Debugf("客户端 断开 : %s", err)
+	logger.Debugf("客户端<%s>断开 : %s", c.conn.RemoteAddr(), err)
 }
 
 //读取连接
 func (c *Client) read() {
 	defer func() {
 		c.conn.Close()
+		if p := recover(); p != nil {
+			logger.Errorf("[recovery] read : %v", p)
+		}
 	}()
-
 	for {
 		_, msg, err := c.conn.ReadMessage()
 		if err != nil {
-			c.close(err)
-			break
+			errStr := err.Error()
+			logger.Errorf("websocket err:%s", errStr)
+			if strings.Contains(errStr, "1000") || strings.Contains(errStr, "1001") || strings.Contains(errStr, "connection reset by peer") || strings.Contains(errStr, "repeated read on failed websocket connection") || strings.Contains(errStr, "use of closed network connection") {
+				c.close(err)
+				break
+			}
+		} else {
+			c.setLastActionTime(time.Now())
+			c.handleClientData(msg)
 		}
-		c.setLastActionTime(time.Now())
-		c.handleClientData(msg)
 	}
 }
 
@@ -257,6 +285,9 @@ func (c *Client) read() {
 func (c *Client) write() {
 	defer func() {
 		c.conn.Close()
+		if p := recover(); p != nil {
+			logger.Errorf("[recovery] write : %v", p)
+		}
 	}()
 	for {
 		select {
@@ -276,6 +307,11 @@ func (c *Client) write() {
 */
 func (c *Client) closeConnMechanism() {
 	go func() {
+		defer func() {
+			if p := recover(); p != nil {
+				logger.Errorf("[recovery] closeConnMechanism : %v", p)
+			}
+		}()
 		//服务器已启动
 		time.Sleep(time.Second * 1)
 		if c.getUID() == "" {
@@ -407,6 +443,8 @@ func (c *Client) createUser(uid, username string) string {
 		logger.CheckFatal(err, "CreateUser")
 		err = db.QueryRow("select userid from userinfo where uid=?", uid).Scan(&userid)
 		logger.CheckFatal(err, "CreateUser2")
+		_, err = db.Exec("call UserInit(?)", userid)
+		logger.CheckFatal(err, "CreateUser3")
 	} else {
 		db.Exec("update userinfo set userinfo.username=? where uid=?", username, uid)
 	}
@@ -429,6 +467,8 @@ func (c *Client) GetBaseInfoByUID(uid string) string {
 	userName := ""
 	if p != nil {
 		userName = *p
+	} else {
+		userName = c.getUserNameFromDB(uid)
 	}
 	return uid + ",," + userName
 }
@@ -437,14 +477,14 @@ func (c *Client) GetBaseInfoByUID(uid string) string {
 是否有正在进行的比赛
 */
 func (c *Client) ExistingMatch() {
-	userid := c.getUserID()
-	db := GetDB("loadbalancer")
 	gameaddr, roomid, matchid, roomtype := "", "-1", "", ""
-	rows, err := db.Query("select gameaddr,roomid,matchid,roomtype from userinfo where userid=?", userid)
-	logger.CheckFatal(err, "ExistingMatch")
-	defer rows.Close()
-	for rows.Next() {
-		rows.Scan(&gameaddr, &roomid, &matchid, &roomtype)
+	key := fmt.Sprintf("usermatch:%s", c.getUserID())
+	rds := GetRedis("game")
+	defer rds.Close()
+	data, err := redis.Strings(rds.Do("hmget", key, "gameaddr", "roomid", "matchid", "roomtype"))
+	logger.CheckError(err)
+	if data[0] != "" {
+		gameaddr, roomid, matchid, roomtype = data[0], data[1], data[2], data[3]
 	}
 	res := "0"
 	//有正在进行的比赛
@@ -459,6 +499,18 @@ func (c *Client) ExistingMatch() {
 	}
 	c.setCurrentRoomID(roomid)
 	c.setCurrentRoomInfo(res)
+}
+
+//获取username
+func (c *Client) getUserNameFromDB(uid string) string {
+	db := GetDB("game")
+	userName := ""
+	err := db.QueryRow("select videousername from userinfo where uid=?", uid).Scan(&userName)
+	logger.CheckError(err)
+	if userName != "" {
+		clientManager.saveUserName(uid, &userName)
+	}
+	return userName
 }
 
 //处理客户端数据
@@ -495,8 +547,8 @@ func (c *Client) handleClientData(msg []byte) string {
 			c.setSessionKey(sessionKey)
 			c.setUID(uid)
 			c.setUserID(userid)
-			c.ExistingMatch()
 			clientManager.saveClient(c)
+			c.ExistingMatch()
 			name := clientManager.getUserName(uid)
 			if name != nil {
 				c.setUserName(*name)
@@ -509,19 +561,18 @@ func (c *Client) handleClientData(msg []byte) string {
 	}
 	//初始化没有成功,关闭连接
 	if c.getUID() == "" {
-		c.closeConn()
 		return ""
 	}
 	if funcName == "PING" { //心跳包,用来断线重连
 		c.push(c.Format(funcName, "PONG"))
 		return ""
 	}
-	if funcName == "GetBaseInfo" { //心跳包,用来断线重连
+	if funcName == "GetBaseInfo" { //
 		userid := p[1]
 		c.Log_Push(c.Format(funcName, c.GetBaseInfo(userid)))
 		return ""
 	}
-	if funcName == "GetBaseInfoByUID" { //心跳包,用来断线重连
+	if funcName == "GetBaseInfoByUID" { //
 		uid := p[1]
 		c.Log_Push(c.Format(funcName, c.GetBaseInfoByUID(uid)))
 		return ""
@@ -538,14 +589,19 @@ func (c *Client) handleClientData(msg []byte) string {
 		uid := p[1]
 		newUserName := p[2]
 		clientManager.saveUserName(uid, &newUserName)
+		db := GetDB("game")
+		_, err := db.Exec("update userinfo set videousername=? where uid=?", newUserName, uid)
+		logger.CheckError(err)
 		cl := clientManager.GetClientByUID(uid)
 		if cl != nil {
 			cl.setUserName(newUserName)
 		}
 		c.push(c.Format(funcName, common.Res_Succeed))
+		clientManager.lock.Lock()
 		for _, cl := range clientManager.clients {
 			cl.push(c.Format(funcName, fmt.Sprintf("%s,%s", uid, newUserName)))
 		}
+		clientManager.lock.Unlock()
 		return ""
 	}
 	if funcName == "ExistingMatch" { //是否有正在进行的比赛
@@ -554,7 +610,7 @@ func (c *Client) handleClientData(msg []byte) string {
 		return ""
 	}
 	if funcName == "Connect" { //连接游戏服务器
-		additional := []string{c.getUID(), token, c.getSessionKey(), Secret}
+		additional := []string{c.getUID(), token, c.getSessionKey(), Secret, c.getHeadUrl()}
 		p = append(p, additional...)
 		rpcArgs.V["args"] = p
 	}

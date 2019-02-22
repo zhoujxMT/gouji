@@ -5,6 +5,7 @@
 package engine
 
 import (
+	"fmt"
 	"strings"
 
 	. "kelei.com/utils/common"
@@ -29,8 +30,8 @@ const (
 const (
 	Match_GJYX = iota //够级英雄
 	Match_HYTW        //好友同玩
+	Match_HXS         //海选赛
 	Match_KDFS        //开点发四
-	Match_DJS         //大奖赛
 )
 
 const (
@@ -55,6 +56,7 @@ const (
 	SetController_Liuju                 //流局
 	SetController_Kou            = 14   //扣牌
 	SetController_Kou_ForceCheck = 15   //扣牌-要不起
+	SetController_Burn_New       = 16   //烧牌新一轮出牌
 )
 
 const (
@@ -77,6 +79,7 @@ const (
 const (
 	MatchingStatus_Run   = iota //进行中
 	MatchingStatus_Pause        //暂停
+	MatchingStatus_Over         //结束
 )
 
 const (
@@ -130,6 +133,7 @@ type Room struct {
 	orderController   bool              //顺序牌权
 	threeAskBelowUser bool              //打出够级牌,3轮够级牌后开始问下家要不要
 	fake              bool              //假烧
+	dealMode          int               //发牌模式
 }
 
 func (r *Room) GetRoomID() *string {
@@ -210,6 +214,16 @@ func (r *Room) getGameRule() int {
 //设置游戏规则
 func (r *Room) setGameRule(gameRule int) {
 	r.gameRule = gameRule
+}
+
+//获取游戏规则
+func (r *Room) getDealMode() int {
+	return r.dealMode
+}
+
+//设置游戏规则
+func (r *Room) setDealMode(dealMode int) {
+	r.dealMode = dealMode
 }
 
 //获取游戏规则
@@ -658,6 +672,21 @@ func (r *Room) SetAllUsersTrusteeshipStatus(status bool) {
 	for _, user := range r.getUsers() {
 		if user != nil {
 			user.trusteeship = status
+		}
+	}
+}
+
+/*
+所有选手端是否在线
+*/
+func (r *Room) AllUsersOnlinePush() {
+	for _, user := range r.getUsers() {
+		if user != nil {
+			status := 0
+			if user.getOnline() {
+				status = 1
+			}
+			r.pushJudgment("Online_Push", fmt.Sprintf("%s|%d", *user.getUserID(), status))
 		}
 	}
 }

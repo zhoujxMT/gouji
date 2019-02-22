@@ -2,6 +2,7 @@ package engine
 
 import (
 	"net"
+	"strconv"
 
 	"kelei.com/utils/common"
 	"kelei.com/utils/logger"
@@ -46,11 +47,14 @@ func (this *Engine) getUser(args *rpcs.Args) *User {
 */
 func (this *Engine) Connect(args *rpcs.Args) *rpcs.Reply {
 	p := this.getArgs(args)
-	userid, uid, token, sessionKey, secret := p[0], p[1], p[2], p[3], p[4]
+	userid, uid, token, sessionKey, secret, headUrl := p[0], p[1], p[2], p[3], p[4], p[5]
 	user := UserManage.AddUser(&uid, &userid, args.V["clientConn"].(net.Conn))
 	user.SetToken(token)
 	user.SetSessionKey(sessionKey)
 	user.SetSecret(secret)
+	user.SetHeadUrl(headUrl)
+	//更新数据库玩家头像
+	db.Exec("update userinfo set headurl=? where userinfo.userid=?", headUrl, userid)
 	return &rpcs.Reply{nil, common.SC_OK}
 }
 
@@ -74,7 +78,9 @@ func (this *Engine) Matching(args *rpcs.Args) *rpcs.Reply {
 	进入房间
 */
 func (this *Engine) EnterRoom(args *rpcs.Args) *rpcs.Reply {
-	res := EnterRoom(this.getArgs(args))
+	p := this.getArgs(args)
+	p = common.InsertStringSlice(p, []string{strconv.Itoa(MatchingMode_Normal)}, 3)
+	res := EnterRoom(p)
 	return &rpcs.Reply{res, common.SC_OK}
 }
 
@@ -87,6 +93,12 @@ func (this *Engine) ChangeTable(args *rpcs.Args) *rpcs.Reply {
 //准备
 func (this *Engine) Setout(args *rpcs.Args) *rpcs.Reply {
 	res := Setout(this.getArgs(args))
+	return &rpcs.Reply{res, common.SC_OK}
+}
+
+//获取座位状态的推送
+func (this *Engine) GetMatchingPush(args *rpcs.Args) *rpcs.Reply {
+	res := GetMatchingPush(this.getArgs(args))
 	return &rpcs.Reply{res, common.SC_OK}
 }
 
@@ -141,12 +153,6 @@ func (this *Engine) SetUserTG(args *rpcs.Args) *rpcs.Reply {
 //退出比赛
 func (this *Engine) ExitMatch(args *rpcs.Args) *rpcs.Reply {
 	res := ExitMatch(this.getArgs(args))
-	return &rpcs.Reply{res, common.SC_OK}
-}
-
-//创建玩家
-func (this *Engine) CreateUser(args *rpcs.Args) *rpcs.Reply {
-	res := CreateUser(this.getArgs(args))
 	return &rpcs.Reply{res, common.SC_OK}
 }
 
@@ -393,5 +399,29 @@ func (this *Engine) Resume(args *rpcs.Args) *rpcs.Reply {
 //解散牌局
 func (this *Engine) Dissolve(args *rpcs.Args) *rpcs.Reply {
 	res := Dissolve(this.getArgs(args))
+	return &rpcs.Reply{res, common.SC_OK}
+}
+
+//获取海选赛排名
+func (this *Engine) GetAuditionInfo(args *rpcs.Args) *rpcs.Reply {
+	res := GetAuditionInfo(this.getArgs(args))
+	return &rpcs.Reply{res, common.SC_OK}
+}
+
+//获取实名认证信息
+func (this *Engine) GetCertification(args *rpcs.Args) *rpcs.Reply {
+	res := GetCertification(this.getArgs(args))
+	return &rpcs.Reply{res, common.SC_OK}
+}
+
+//保存实名认证信息
+func (this *Engine) SaveCertification(args *rpcs.Args) *rpcs.Reply {
+	res := SaveCertification(this.getArgs(args))
+	return &rpcs.Reply{res, common.SC_OK}
+}
+
+//获取海选赛奖励
+func (this *Engine) GetAuditionAward(args *rpcs.Args) *rpcs.Reply {
+	res := GetAuditionAward(this.getArgs(args))
 	return &rpcs.Reply{res, common.SC_OK}
 }

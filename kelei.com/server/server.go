@@ -36,12 +36,15 @@ func main() {
 	args := frame.Args{}
 	args.ServerName = "server"
 	args.Commands = cmds.GetCmds()
+	//游戏服务器的客户端
 	args.RpcxClient = &frame.RpcxClient{frame.Discovery_MultipleServers, frame.Rpcx{Addr: serversAddr}, "GoujiS", frame.UNIDIRECTIONAL}
 	//mysql
 	sqlDSNs := []*mysql.SqlDSN{}
 	sqlDSNs = append(sqlDSNs, mysql.AnalysisFlag2SqlDSN(gameDB))
 	args.Sql = &frame.Sql{sqlDSNs}
+	//框架启动完毕后执行的方法
 	args.Loaded = start
+	//通过参数启动框架
 	frame.Load(args)
 }
 

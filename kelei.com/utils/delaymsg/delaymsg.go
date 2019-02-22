@@ -5,7 +5,21 @@ import (
 	"fmt"
 	"sync"
 	"time"
+
+	"kelei.com/utils/logger"
 )
+
+var (
+	logUserID = "-1"
+)
+
+func GetLogUserID() string {
+	return logUserID
+}
+
+func SetLogUserID(userid string) {
+	logUserID = userid
+}
 
 const (
 	slotsCount = 36000
@@ -34,14 +48,12 @@ type DelayMessage struct {
 	taskClose chan bool
 	//时间关闭
 	timeClose chan bool
-	//启动时间
-	startTime time.Time
 	//任务映射环形槽
-	taskMapSlot map[string]int64
+	taskMapSlot map[string]int
 	//锁
 	lock sync.Mutex
-	//累计毫秒数
-	millisecond int
+	//userid
+	userid string
 }
 
 //执行的任务函数
@@ -64,8 +76,7 @@ func NewDelayMessage() *DelayMessage {
 		closed:      make(chan bool),
 		taskClose:   make(chan bool),
 		timeClose:   make(chan bool),
-		startTime:   time.Now(),
-		taskMapSlot: make(map[string]int64),
+		taskMapSlot: make(map[string]int),
 	}
 	dm.lock.Lock()
 	defer dm.lock.Unlock()
@@ -81,6 +92,14 @@ func (dm *DelayMessage) getStatus() int {
 
 func (dm *DelayMessage) setStatus(status int) {
 	dm.status = status
+}
+
+func (dm *DelayMessage) GetUserID() string {
+	return dm.userid
+}
+
+func (dm *DelayMessage) SetUserID(userid string) {
+	dm.userid = userid
 }
 
 //启动延迟消息
@@ -125,6 +144,11 @@ func (dm *DelayMessage) taskLoop_back() {
 		for k, v := range tasks {
 			if v.cycleNum == 0 {
 				go func() {
+					defer func() {
+						if p := recover(); p != nil {
+							logger.Errorf("[recovery] taskLoop_back : %v", p)
+						}
+					}()
 					v.exec(v.params...)
 					//删除运行过的任务
 					delete(tasks, k)
@@ -157,6 +181,9 @@ func (dm *DelayMessage) timeLoop() {
 					} else {
 						dm.curIndex++
 					}
+					if dm.GetUserID() == logUserID {
+						logger.Debugf("11111111:%d,%d", dm.curIndex, len(dm.slots[dm.curIndex]))
+					}
 					dm.taskLoop_back()
 				}
 			}
@@ -168,16 +195,20 @@ func (dm *DelayMessage) timeLoop() {
 func (dm *DelayMessage) AddTask(t time.Time, key string, exec TaskFunc, params []interface{}) error {
 	dm.lock.Lock()
 	defer dm.lock.Unlock()
-	if dm.startTime.After(t) {
+	timeNow := time.Now()
+	if timeNow.After(t) {
 		return errors.New("时间错误")
 	}
 	//当前时间与指定时间相差秒数
 	//	subSecond := t.UnixNano()/1e8 - dm.startTime.UnixNano()/1e8
-	subSecond := t.Sub(dm.startTime).Nanoseconds() / 1e6 / 100
+	subSecond := int(t.Sub(timeNow).Nanoseconds() / 1e6 / 100)
 	//计算循环次数
-	cycleNum := int(subSecond / slotsCount)
+	cycleNum := subSecond / slotsCount
 	//计算任务所在的slots的下标
-	ix := subSecond % slotsCount
+	ix := (dm.curIndex + subSecond) % slotsCount
+	if dm.GetUserID() == logUserID {
+		logger.Debugf("3333333333333333:%d", ix)
+	}
 	//把任务加入tasks中
 	tasks := dm.slots[ix]
 	if _, ok := tasks[key]; ok {

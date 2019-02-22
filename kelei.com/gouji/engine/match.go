@@ -5,51 +5,43 @@
 package engine
 
 import (
-	"bytes"
-	"context"
 	"fmt"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/garyburd/redigo/redis"
-	"github.com/smallnest/rpcx/client"
 
 	. "kelei.com/utils/common"
 	"kelei.com/utils/frame"
 	"kelei.com/utils/logger"
-	"kelei.com/utils/rpcs"
+)
+
+const (
+	MATCHTYPECOUNT    = 5
+	GJYXROOMTYPECOUNT = 5
 )
 
 var (
-	addr    string
-	lock    sync.Mutex
-	xclient client.XClient
+	addr         string
+	lock         sync.Mutex
+	pcountT      int     //总人数(所有服务器)
+	matchpcountT []int   //某类型赛事人数(所有服务器)
+	roompcountT  [][]int //某类型房间人数(所有服务器)
 )
 
 func engine_Init(addr_ string) {
 	addr = addr_
-	xclient = frame.NewRpcxClient(frame.GetArgs().RpcxClient)
-	removeUserMatchInfo()
-	removeRoomMatchInfo()
 	go func() {
 		for {
-			syncGameInfo() //同步服务器人数信息
-			time.Sleep(time.Second)
-		}
-	}()
-	go func() {
-		for {
-			syncPCount()     //同步所有比赛类型的人数信息
-			savePCountToDB() //保存所有比赛类型的人数信息
+			savePCount()
+			mergePCount()
 			time.Sleep(time.Second * 5)
 		}
 	}()
 }
 
 func Reset() {
-	mapPCount = make(map[int]map[int]int)
 	RoomManage.Reset()
 	UserManage.Reset()
 }
@@ -78,9 +70,6 @@ func pushMessageToUsers(funcName string, messages []string, userids []string) {
 		if userid != "" {
 			u := UserManage.GetUser(&userid)
 			if u == nil {
-				u = UserManage.GetJudgmentUser()
-			}
-			if u == nil {
 				continue
 			}
 			message := ""
@@ -94,162 +83,81 @@ func pushMessageToUsers(funcName string, messages []string, userids []string) {
 	}
 }
 
-//删除数据库中此服务器下的用户比赛信息
-func removeUserMatchInfo() {
-	args := &rpcs.Args{}
-	args.V = map[string]interface{}{"args": []string{addr}}
-	reply := &rpcs.Reply{}
-	err := xclient.Call(context.Background(), "RemoveUserMatchInfo", args, reply)
-	logger.CheckError(err, "removeUserMatchInfo")
-}
-
-//删除数据库中此服务器下的用户比赛信息
-func removeRoomMatchInfo() {
-	args := &rpcs.Args{}
-	args.V = map[string]interface{}{"args": []string{addr}}
-	reply := &rpcs.Reply{}
-	err := xclient.Call(context.Background(), "RemoveRoomMatchInfo", args, reply)
-	logger.CheckError(err, "removeRoomMatchInfo")
-}
-
-var mapPCount = make(map[int]map[int]int)
-
-//向负载均衡服务器同步此游戏服务器的“所有类型的比赛人数”
-func syncPCount() {
-	lock.Lock()
-	defer lock.Unlock()
-	pCountInfo := *getMatchPCountInfo()
-	//此服务器没有房间
-	if pCountInfo == Res_NoBack {
-		return
-	}
-	args := &rpcs.Args{}
-	args.V = map[string]interface{}{"args": []string{addr, pCountInfo}}
-	reply := &rpcs.Reply{}
-	err := xclient.Call(context.Background(), "SyncPCount", args, reply)
-	if err != nil {
-		logger.Errorf("syncPCount : %s", err.Error())
-		return
-	}
-	strPCount := reply.RS
-	strPCountToMapPcount(strPCount)
-}
-
-//获取比赛人数的信息
-func getMatchPCountInfo() *string {
-	res := Res_Unknown
-	m := make(map[int]map[int]int)
-	rooms := RoomManage.GetRooms()
-	for _, room := range rooms {
-		matchID, roomType := room.GetMatchID(), room.GetRoomType()
-		if m[matchID] == nil {
-			m[matchID] = make(map[int]int)
-		}
-		m[matchID][roomType] += (room.GetPCount() + room.GetIdlePCount())
-	}
-	fillMap(m)
-	buff := bytes.Buffer{}
-	for matchID, mapRoom := range m {
-		for roomType, pcount := range mapRoom {
-			buff.WriteString(fmt.Sprintf("%d$%d$%d|", matchID, roomType, pcount))
-		}
-	}
-	str := buff.String()
-	if str != "" {
-		res = str[:len(str)-1]
-	}
-	return &res
-}
-
-//填充人数信息
-func fillMap(m map[int]map[int]int) {
-	allMatchInfo := *getAllMatchInfo()
-	arrMatchInfo := strings.Split(allMatchInfo, "|")
-	for _, matchInfo := range arrMatchInfo {
-		info := strings.Split(matchInfo, "$")
-		matchID, _ := strconv.Atoi(info[0])
-		room := Room{}
-		allRoomData := *room.getAllRoomData()
-		arrAllRoomData := strings.Split(allRoomData, "|")
-		for _, roomData := range arrAllRoomData {
-			arrRoomData_s := strings.Split(roomData, "$")
-			arrRoomData := StrArrToIntArr(arrRoomData_s)
-			roomType := arrRoomData[0]
-			if m[matchID] == nil {
-				m[matchID] = make(map[int]int)
-			}
-			if m[matchID][roomType] == 0 {
-				m[matchID][roomType] = 0
-			}
-		}
-	}
-}
-
-//将字符串人数转化成map人数
-func strPCountToMapPcount(strPCount *string) {
-	if *strPCount == Res_NoBack {
-		return
-	}
-	infos := strings.Split(*strPCount, "|")
-	for _, info_s := range infos {
-		info := StrArrToIntArr(strings.Split(info_s, "$"))
-		matchID := info[0]
-		roomType := info[1]
-		pcount := info[2]
-		if mapPCount[matchID] == nil {
-			mapPCount[matchID] = make(map[int]int)
-		}
-		mapPCount[matchID][roomType] = pcount
-	}
-}
-
-//将人数存入数据库
-func savePCountToDB() {
-	//map[matchID]pcount
-	m := make(map[int]int)
-	for matchID, mapRoom := range mapPCount {
-		for _, pcount := range mapRoom {
-			m[matchID] += pcount
-		}
-	}
-	allMatchInfo := *getAllMatchInfo()
-	arrMatchInfo := strings.Split(allMatchInfo, "|")
-	arr := []string{}
-	for _, matchInfo := range arrMatchInfo {
-		info := strings.Split(matchInfo, "$")
-		matchID, _ := strconv.Atoi(info[0])
-		pcount := m[matchID]
-		arr = append(arr, strconv.Itoa(matchID), strconv.Itoa(pcount))
-	}
-	pCountInfo := strings.Join(arr, ",")
-	_, err := db.Exec("call PCountUpdate(?)", pCountInfo)
-	logger.CheckFatal(err, "savePCountToDB")
-}
-
-//向负载均衡服务器同步此游戏服务器的人数和房间数
-func syncGameInfo() {
+//保存本服务器人数
+func savePCount() {
 	defer func() {
 		if p := recover(); p != nil {
-			errInfo := fmt.Sprintf("连接负载均衡服务器失败 : { %v }", p)
+			errInfo := fmt.Sprintf("savePCount : { %v }", p)
 			logger.Errorf(errInfo)
 		}
 	}()
-	lock.Lock()
-	defer lock.Unlock()
-	mapRoomInfo := map[string]int{}
+	//服务器总人数
+	pcount := UserManage.GetUserCount()
+	//某类型赛事人数
+	matchpcount := make([]int, MATCHTYPECOUNT)
+	//某类型房间人数
+	roompcount := make([][]int, len(matchpcount))
+	//初始化房间类型
+	roompcount[Match_GJYX] = make([]int, GJYXROOMTYPECOUNT)
 	for _, room := range RoomManage.GetRooms() {
-		roomkey := fmt.Sprintf("%s:%d:%d", addr, room.GetMatchID(), room.GetRoomType())
-		mapRoomInfo[roomkey] = mapRoomInfo[roomkey] + room.GetPCount() + room.GetIdlePCount()
+		matchid := room.GetMatchID()
+		roomtype := room.GetRoomType()
+		for _, user := range room.getUsers() {
+			if user != nil {
+				matchpcount[matchid] += 1
+				roompcount[matchid][roomtype] += 1
+			}
+		}
 	}
-
-	args_ := []string{}
-	for roomkey, usercount := range mapRoomInfo {
-		args_ = append(args_, fmt.Sprintf("%s:%d", roomkey, usercount))
+	rds := getGameRds()
+	defer rds.Close()
+	roompcount_ := []string{}
+	for _, v := range roompcount {
+		roompcount_ = append(roompcount_, strings.Join(IntArrToStrArr(v), "|"))
 	}
+	matchpcountStr := strings.Join(IntArrToStrArr(matchpcount), ",")
+	roompcountStr := strings.Join(roompcount_, ",")
+	rds.Do("hmset", addr, "pcount", pcount, "matchpcount", matchpcountStr, "roompcount", roompcountStr)
+}
 
-	args := &rpcs.Args{}
-	args.V = map[string]interface{}{"args": args_}
-	reply := &rpcs.Reply{}
-	err := xclient.Call(context.Background(), "SyncGameInfo", args, reply)
-	logger.CheckError(err, "syncGameInfo")
+//合并所有服务器人数
+func mergePCount() {
+	defer func() {
+		if p := recover(); p != nil {
+			errInfo := fmt.Sprintf("mergePCount : { %v }", p)
+			logger.Errorf(errInfo)
+		}
+	}()
+	rds := getGameRds()
+	defer rds.Close()
+	servers, err := redis.Strings(rds.Do("lrange", "servers", 0, -1))
+	logger.CheckError(err)
+	//总人数(所有服务器)
+	pcountT := 0
+	//某类型赛事人数(所有服务器)
+	matchpcountT = make([]int, MATCHTYPECOUNT)
+	//某类型房间人数(所有服务器)
+	roompcountT = make([][]int, len(matchpcountT))
+	//初始化房间类型(所有服务器)
+	roompcountT[Match_GJYX] = make([]int, GJYXROOMTYPECOUNT)
+	for _, server := range servers {
+		data, err := redis.Strings(rds.Do("hmget", server, "pcount", "matchpcount", "roompcount"))
+		logger.CheckError(err)
+		pcountT += StrToInt(data[0])
+		matchpcount := data[1]
+		arr := strings.Split(matchpcount, ",")
+		for i, v := range arr {
+			matchpcountT[i] += StrToInt(v)
+		}
+		roompcount := data[2]
+		arr = strings.Split(roompcount, ",")
+		for i, v := range arr {
+			if v != "" {
+				arr2 := strings.Split(v, "|")
+				for j, vv := range arr2 {
+					roompcountT[i][j] += StrToInt(vv)
+				}
+			}
+		}
+	}
 }
